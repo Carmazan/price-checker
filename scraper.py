@@ -116,6 +116,14 @@ def scrape_enter(page, max_pages=30):
         ))
 
         if not product_links:
+            if page_number == 1:
+                try:
+                    page_title = page.title()
+                except Exception:
+                    page_title = "?"
+                body_snippet = page.locator("body").inner_text()[:300]
+                print(f"  [diagnostic] 0 linkuri gasite. Titlu pagina: {page_title!r}")
+                print(f"  [diagnostic] Primele 300 caractere din body: {body_snippet!r}")
             break
 
         stop = False
