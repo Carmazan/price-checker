@@ -1,0 +1,5 @@
+*.xlsx
+debug_price.py
+enter_pc.py
+__pycache__/
+*.pyc
