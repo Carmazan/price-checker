@@ -141,6 +141,15 @@ def scrape_enter(page, max_pages=30):
 
             text = page.locator("body").inner_text()
             if "În stoc" not in text:
+                if link == product_links[0]:
+                    try:
+                        page_title = page.title()
+                    except Exception:
+                        page_title = "?"
+                    print(f"  [diagnostic] Primul produs a esuat verificarea stocului.")
+                    print(f"  [diagnostic] Link: {link}")
+                    print(f"  [diagnostic] Titlu pagina: {page_title!r}")
+                    print(f"  [diagnostic] Primele 500 caractere din body: {text[:500]!r}")
                 stop = True
                 break
 
