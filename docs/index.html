@@ -257,6 +257,7 @@
   .change-row .change-info { min-width: 0; }
   .change-row .change-info .t { font-size: 13px; }
   .change-row .change-info .s { font-size: 11px; color: var(--muted); font-family: var(--mono); margin-top: 2px; }
+  .change-row .change-info .c { font-size: 11px; color: var(--accent); margin-top: 4px; }
   .change-row .change-price { text-align: right; white-space: nowrap; }
 
   .dot-new { color: var(--good); }
@@ -287,6 +288,7 @@
   <div id="tab-compare">
     <div class="filters">
       <input type="text" id="compareSearch" placeholder="Caută după CPU, GPU...">
+      <select id="compareDate"></select>
       <select id="compareSort">
         <option value="diff-desc">Diferență preț: mare → mică</option>
         <option value="diff-asc">Diferență preț: mică → mare</option>
@@ -299,6 +301,7 @@
   <div id="tab-all" style="display:none;">
     <div class="filters">
       <input type="text" id="allSearch" placeholder="Caută produs, CPU, GPU...">
+      <select id="allDate"></select>
       <select id="allSite">
         <option value="">Toate site-urile</option>
         <option value="enter.online">enter.online</option>
@@ -326,6 +329,13 @@
   </div>
 
   <div id="tab-changes" style="display:none;">
+    <div class="filters">
+      <select id="changesSite">
+        <option value="">Toate site-urile</option>
+        <option value="enter.online">enter.online</option>
+        <option value="xstore.md">xstore.md</option>
+      </select>
+    </div>
     <div class="status-line" id="changesStatus"></div>
     <div class="change-section">
       <h2><span class="dot-new">●</span> PC-uri noi</h2>
@@ -354,6 +364,8 @@ const HEADERS = {
 
 let allItems = [];   // deduplicat, cel mai recent per (site, link)
 let groups = {};     // fingerprint_key -> [items]
+let dayIndex = new Map(); // ziua (YYYY-MM-DD) -> Map(site|link -> {raw, fp})
+let sortedDays = [];  // zile disponibile, descrescator
 
 function formatPrice(n) {
   if (n === null || n === undefined) return "—";
@@ -386,14 +398,8 @@ function dedupe(rows) {
   return Array.from(seen.values());
 }
 
-function dayStr(iso) {
-  return iso.slice(0, 10);
-}
-
-function buildChanges(rawRows) {
-  // pentru fiecare (site,link,zi) pastram cea mai recenta inregistrare din ziua respectiva
-  const byDay = new Map(); // day -> Map(site|link -> {raw, fp})
-
+function buildDayIndex(rawRows) {
+  const byDay = new Map();
   for (const row of rawRows) {
     const raw = row.products_raw;
     if (!raw || !raw.pret) continue;
@@ -406,15 +412,32 @@ function buildChanges(rawRows) {
       dayMap.set(key, { raw, fp: row });
     }
   }
+  return byDay;
+}
 
-  const days = Array.from(byDay.keys()).sort().reverse();
+function dayStr(iso) {
+  return iso.slice(0, 10);
+}
+
+function findCompetitor(fingerprintKey, ownSite, dayMap) {
+  if (!fingerprintKey || fingerprintKey.includes("unknown")) return null;
+  for (const other of dayMap.values()) {
+    if (other.raw.site !== ownSite && other.fp.fingerprint_key === fingerprintKey) {
+      return other;
+    }
+  }
+  return null;
+}
+
+function computeChanges() {
+  const days = sortedDays;
   if (days.length < 1) return { today: null, yesterday: null, added: [], removed: [], changed: [] };
 
   const today = days[0];
   const yesterday = days.length > 1 ? days[1] : null;
 
-  const todayMap = byDay.get(today);
-  const yesterdayMap = yesterday ? byDay.get(yesterday) : new Map();
+  const todayMap = dayIndex.get(today);
+  const yesterdayMap = yesterday ? dayIndex.get(yesterday) : new Map();
 
   const added = [];
   const removed = [];
@@ -435,37 +458,51 @@ function buildChanges(rawRows) {
     if (!todayMap.has(key)) removed.push(item);
   }
 
-  return { today, yesterday, added, removed, changed };
+  return { today, yesterday, added, removed, changed, todayMap };
 }
 
-function renderChanges(rawRows) {
-  const { today, yesterday, added, removed, changed } = buildChanges(rawRows);
+function renderChanges() {
+  const siteFilter = document.getElementById("changesSite").value;
+  const { today, yesterday, added, removed, changed, todayMap } = computeChanges();
   const statusEl = document.getElementById("changesStatus");
 
-  if (!yesterday) {
-    statusEl.textContent = `Avem date doar pentru o singură zi (${today || "—"}) — comparația apare de mâine.`;
+  if (!today) {
+    statusEl.textContent = "Nu avem încă date.";
+  } else if (!yesterday) {
+    statusEl.textContent = `Avem date doar pentru o singură zi (${today}) — comparația apare de mâine.`;
   } else {
     statusEl.textContent = `Comparație: ${yesterday} → ${today}`;
   }
 
   const siteClass = s => s === "enter.online" ? "site-enter" : "site-xstore";
+  const filterFn = raw => !siteFilter || raw.site === siteFilter;
+
+  const competitorLine = (item) => {
+    if (!todayMap) return "";
+    const comp = findCompetitor(item.fp.fingerprint_key, item.raw.site, todayMap);
+    if (!comp) return "";
+    return `<div class="c">↔ ${comp.raw.site}: ${formatPrice(comp.raw.pret)} (configurație identică)</div>`;
+  };
 
   const newEl = document.getElementById("changesNew");
-  newEl.innerHTML = added.length === 0
+  const addedFiltered = added.filter(({ raw }) => filterFn(raw));
+  newEl.innerHTML = addedFiltered.length === 0
     ? `<div class="empty-state" style="padding:20px;">Niciun PC nou.</div>`
-    : added.map(({ raw }) => `
+    : addedFiltered.map((item) => `
         <div class="change-row">
           <div class="change-info">
-            <span class="site-badge ${siteClass(raw.site)}">${raw.site}</span>
-            <div class="t"><a class="prod-link" href="${raw.link}" target="_blank" rel="noopener">${raw.titlu}</a></div>
+            <span class="site-badge ${siteClass(item.raw.site)}">${item.raw.site}</span>
+            <div class="t"><a class="prod-link" href="${item.raw.link}" target="_blank" rel="noopener">${item.raw.titlu}</a></div>
+            ${competitorLine(item)}
           </div>
-          <div class="change-price price">${formatPrice(raw.pret)}</div>
+          <div class="change-price price">${formatPrice(item.raw.pret)}</div>
         </div>`).join("");
 
   const priceEl = document.getElementById("changesPrice");
-  priceEl.innerHTML = changed.length === 0
+  const changedFiltered = changed.filter(({ item }) => filterFn(item.raw));
+  priceEl.innerHTML = changedFiltered.length === 0
     ? `<div class="empty-state" style="padding:20px;">Niciun preț schimbat.</div>`
-    : changed.map(({ item, prevPret }) => {
+    : changedFiltered.map(({ item, prevPret }) => {
         const raw = item.raw;
         const diff = raw.pret - prevPret;
         const cls = diff < 0 ? "delta-good" : "delta-bad";
@@ -476,15 +513,17 @@ function renderChanges(rawRows) {
             <span class="site-badge ${siteClass(raw.site)}">${raw.site}</span>
             <div class="t"><a class="prod-link" href="${raw.link}" target="_blank" rel="noopener">${raw.titlu}</a></div>
             <div class="s">${formatPrice(prevPret)} → ${formatPrice(raw.pret)}</div>
+            ${competitorLine(item)}
           </div>
           <span class="delta-chip ${cls}">${sign}${formatPrice(diff)}</span>
         </div>`;
       }).join("");
 
   const goneEl = document.getElementById("changesGone");
-  goneEl.innerHTML = removed.length === 0
+  const removedFiltered = removed.filter(({ raw }) => filterFn(raw));
+  goneEl.innerHTML = removedFiltered.length === 0
     ? `<div class="empty-state" style="padding:20px;">Niciun PC dispărut.</div>`
-    : removed.map(({ raw }) => `
+    : removedFiltered.map(({ raw }) => `
         <div class="change-row">
           <div class="change-info">
             <span class="site-badge ${siteClass(raw.site)}">${raw.site}</span>
@@ -514,8 +553,13 @@ function buildGroups(items) {
 function renderCompare() {
   const search = document.getElementById("compareSearch").value.toLowerCase();
   const sortMode = document.getElementById("compareSort").value;
+  const dateFilter = document.getElementById("compareDate").value;
 
-  let entries = Object.entries(groups);
+  const dayMap = dayIndex.get(dateFilter);
+  const dayItems = dayMap ? Array.from(dayMap.values()) : allItems;
+  const dayGroups = buildGroups(dayItems);
+
+  let entries = Object.entries(dayGroups);
 
   entries = entries.map(([key, arr]) => {
     const sorted = [...arr].sort((a, b) => a.raw.pret - b.raw.pret);
@@ -595,8 +639,10 @@ function renderAll() {
   const search = document.getElementById("allSearch").value.toLowerCase();
   const siteFilter = document.getElementById("allSite").value;
   const sortMode = document.getElementById("allSort").value;
+  const dateFilter = document.getElementById("allDate").value;
 
-  let items = [...allItems];
+  const dayMap = dayIndex.get(dateFilter);
+  let items = dayMap ? Array.from(dayMap.values()) : [...allItems];
 
   if (siteFilter) items = items.filter(i => i.raw.site === siteFilter);
 
@@ -614,7 +660,7 @@ function renderAll() {
     return new Date(b.raw.scraped_at) - new Date(a.raw.scraped_at);
   });
 
-  document.getElementById("allStatus").textContent = `${items.length} produse`;
+  document.getElementById("allStatus").textContent = `${items.length} produse · ${dateFilter}`;
 
   const tbody = document.getElementById("allTableBody");
   tbody.innerHTML = items.map(item => {
@@ -649,16 +695,23 @@ document.querySelectorAll("nav.tabs button").forEach(btn => {
   btn.addEventListener("click", () => switchTab(btn.dataset.tab));
 });
 
-["compareSearch", "compareSort"].forEach(id =>
+["compareSearch", "compareSort", "compareDate"].forEach(id =>
   document.getElementById(id).addEventListener("input", renderCompare));
-["allSearch", "allSite", "allSort"].forEach(id =>
+["allSearch", "allSite", "allSort", "allDate"].forEach(id =>
   document.getElementById(id).addEventListener("input", renderAll));
+document.getElementById("changesSite").addEventListener("input", renderChanges);
 
 async function init() {
   try {
     const raw = await fetchData();
     allItems = dedupe(raw);
-    groups = buildGroups(allItems);
+    dayIndex = buildDayIndex(raw);
+    sortedDays = Array.from(dayIndex.keys()).sort().reverse();
+
+    const dateOptions = sortedDays.map((d, i) =>
+      `<option value="${d}">${d}${i === 0 ? " (cel mai recent)" : ""}</option>`).join("");
+    document.getElementById("allDate").innerHTML = dateOptions;
+    document.getElementById("compareDate").innerHTML = dateOptions;
 
     const latestScrape = allItems.reduce((max, i) =>
       new Date(i.raw.scraped_at) > new Date(max) ? i.raw.scraped_at : max, allItems[0]?.raw.scraped_at || "");
@@ -668,7 +721,7 @@ async function init() {
 
     renderCompare();
     renderAll();
-    renderChanges(raw);
+    renderChanges();
   } catch (err) {
     document.getElementById("subtitle").textContent = "Eroare la încărcarea datelor.";
     document.getElementById("compareList").innerHTML =
