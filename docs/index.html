@@ -264,6 +264,59 @@
   .dot-gone { color: var(--bad); }
   .dot-change { color: var(--accent); }
 
+  .evo-btn {
+    background: none;
+    border: 1px solid var(--border);
+    color: var(--muted);
+    font-family: var(--sans);
+    font-size: 11px;
+    padding: 4px 10px;
+    border-radius: 4px;
+    cursor: pointer;
+  }
+
+  .evo-btn:hover { color: var(--accent); border-color: var(--accent); }
+
+  .modal-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.6);
+    z-index: 100;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+  }
+
+  .modal-overlay.open { display: flex; }
+
+  .modal-box {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 20px;
+    max-width: 720px;
+    width: 100%;
+    max-height: 85vh;
+    overflow-y: auto;
+  }
+
+  .modal-box h3 { font-size: 15px; margin-bottom: 4px; }
+  .modal-box .modal-sub { color: var(--muted); font-size: 12px; font-family: var(--mono); margin-bottom: 16px; }
+
+  .modal-close {
+    float: right;
+    background: none;
+    border: none;
+    color: var(--muted);
+    font-size: 18px;
+    cursor: pointer;
+  }
+
+  .evo-legend { display: flex; gap: 16px; margin-top: 10px; font-size: 11px; color: var(--muted); }
+  .evo-legend span { display: inline-flex; align-items: center; gap: 5px; }
+  .evo-legend .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+
   @media (max-width: 640px) {
     .prod-title { max-width: 160px; }
     table { font-size: 12px; }
@@ -281,6 +334,7 @@
   <button class="active" data-tab="compare">Comparație</button>
   <button data-tab="all">Toate produsele</button>
   <button data-tab="changes">Modificări</button>
+  <button data-tab="topgpu">Top GPU</button>
 </nav>
 
 <main>
@@ -313,6 +367,11 @@
         <option value="pret-asc">Preț: crescător</option>
         <option value="pret-desc">Preț: descrescător</option>
         <option value="date-desc">Cel mai recent</option>
+      </select>
+      <select id="allCompetition">
+        <option value="">Toate configurațiile</option>
+        <option value="with">Doar cu concurență (pe ambele site-uri)</option>
+        <option value="without">Doar fără concurență (unic pe un site)</option>
       </select>
     </div>
     <div class="status-line" id="allStatus"></div>
@@ -354,7 +413,35 @@
     </div>
   </div>
 
+  <div id="tab-topgpu" style="display:none;">
+    <div class="filters">
+      <select id="topgpuDate"></select>
+    </div>
+    <div class="status-line" id="topgpuStatus"></div>
+    <table>
+      <thead>
+        <tr>
+          <th>GPU</th>
+          <th>Cel mai ieftin preț</th>
+          <th>Site</th>
+          <th>Produs</th>
+        </tr>
+      </thead>
+      <tbody id="topgpuTableBody"></tbody>
+    </table>
+  </div>
+
 </main>
+
+<div class="modal-overlay" id="evoModal">
+  <div class="modal-box">
+    <button class="modal-close" id="evoClose">✕</button>
+    <h3 id="evoTitle"></h3>
+    <div class="modal-sub" id="evoSub"></div>
+    <div id="evoChartWrap"></div>
+    <div class="evo-legend" id="evoLegend"></div>
+  </div>
+</div>
 
 <script>
 const SUPABASE_URL = "https://bvnhkkcwbfzulqmhphjy.supabase.co";
@@ -538,6 +625,51 @@ function renderChanges() {
         </div>`).join("");
 }
 
+function gpuSortKey(gpuModel) {
+  const m = (gpuModel || "").match(/(\d+)/);
+  const num = m ? parseInt(m[1]) : 0;
+  const isTi = /TI/i.test(gpuModel || "") ? 1 : 0;
+  return num * 10 + isTi;
+}
+
+function renderTopGpu() {
+  const dateFilter = document.getElementById("topgpuDate").value;
+  const dayMap = dayIndex.get(dateFilter);
+  const statusEl = document.getElementById("topgpuStatus");
+  const tbody = document.getElementById("topgpuTableBody");
+
+  if (!dayMap) {
+    statusEl.textContent = "Nu avem date pentru această zi.";
+    tbody.innerHTML = "";
+    return;
+  }
+
+  const bestByGpu = new Map();
+  for (const item of dayMap.values()) {
+    const gpu = item.fp.gpu_model;
+    if (!gpu) continue;
+    const current = bestByGpu.get(gpu);
+    if (!current || item.raw.pret < current.raw.pret) {
+      bestByGpu.set(gpu, item);
+    }
+  }
+
+  const rows = Array.from(bestByGpu.entries()).sort((a, b) => gpuSortKey(a[0]) - gpuSortKey(b[0]));
+  statusEl.textContent = `${rows.length} modele de GPU distincte · ${dateFilter}`;
+
+  tbody.innerHTML = rows.map(([gpu, item]) => {
+    const raw = item.raw;
+    const siteClass = raw.site === "enter.online" ? "site-enter" : "site-xstore";
+    return `
+      <tr>
+        <td style="font-family:var(--mono); font-weight:600;">${gpu}</td>
+        <td class="price">${formatPrice(raw.pret)}</td>
+        <td><span class="site-badge ${siteClass}">${raw.site}</span></td>
+        <td class="prod-title"><a class="prod-link" href="${raw.link}" target="_blank" rel="noopener">${raw.titlu}</a></td>
+      </tr>`;
+  }).join("");
+}
+
 function buildGroups(items) {
   const g = {};
   for (const item of items) {
@@ -635,9 +767,12 @@ function renderCompare() {
           <div>
             <div class="compare-title">${specLine || "Configurație"}</div>
           </div>
-          <span class="delta-chip ${deltaClass}">
-            ${diff > 0 ? "Δ " + formatPrice(diff) + " · " + diffPct.toFixed(1) + "%" : "preț egal"}
-          </span>
+          <div style="display:flex; align-items:center; gap:8px;">
+            <span class="delta-chip ${deltaClass}">
+              ${diff > 0 ? "Δ " + formatPrice(diff) + " · " + diffPct.toFixed(1) + "%" : "preț egal"}
+            </span>
+            <button class="evo-btn" data-fp="${key}" data-spec="${(specLine || "Configurație").replace(/"/g, "&quot;")}">Evoluție preț</button>
+          </div>
         </div>
         <div class="compare-sites">${sitesHtml}</div>
       </div>`;
@@ -649,11 +784,19 @@ function renderAll() {
   const siteFilter = document.getElementById("allSite").value;
   const sortMode = document.getElementById("allSort").value;
   const dateFilter = document.getElementById("allDate").value;
+  const competitionFilter = document.getElementById("allCompetition").value;
 
   const dayMap = dayIndex.get(dateFilter);
   let items = dayMap ? Array.from(dayMap.values()) : [...allItems];
 
   if (siteFilter) items = items.filter(i => i.raw.site === siteFilter);
+
+  if (competitionFilter && dayMap) {
+    items = items.filter(i => {
+      const hasComp = !!findCompetitor(i.fp.fingerprint_key, i.raw.site, dayMap);
+      return competitionFilter === "with" ? hasComp : !hasComp;
+    });
+  }
 
   if (search) {
     items = items.filter(i =>
@@ -698,6 +841,7 @@ function switchTab(tab) {
   document.getElementById("tab-compare").style.display = tab === "compare" ? "block" : "none";
   document.getElementById("tab-all").style.display = tab === "all" ? "block" : "none";
   document.getElementById("tab-changes").style.display = tab === "changes" ? "block" : "none";
+  document.getElementById("tab-topgpu").style.display = tab === "topgpu" ? "block" : "none";
 }
 
 document.querySelectorAll("nav.tabs button").forEach(btn => {
@@ -706,10 +850,104 @@ document.querySelectorAll("nav.tabs button").forEach(btn => {
 
 ["compareSearch", "compareSort", "compareDate"].forEach(id =>
   document.getElementById(id).addEventListener("input", renderCompare));
-["allSearch", "allSite", "allSort", "allDate"].forEach(id =>
+["allSearch", "allSite", "allSort", "allDate", "allCompetition"].forEach(id =>
   document.getElementById(id).addEventListener("input", renderAll));
 ["changesSite", "changesDate"].forEach(id =>
   document.getElementById(id).addEventListener("input", renderChanges));
+document.getElementById("topgpuDate").addEventListener("input", renderTopGpu);
+
+// evolutie pret: delegare eveniment, cardurile se genereaza dinamic
+document.getElementById("compareList").addEventListener("click", (e) => {
+  const btn = e.target.closest(".evo-btn");
+  if (!btn) return;
+  openEvolutionModal(btn.dataset.fp, btn.dataset.spec);
+});
+
+document.getElementById("evoClose").addEventListener("click", closeEvolutionModal);
+document.getElementById("evoModal").addEventListener("click", (e) => {
+  if (e.target.id === "evoModal") closeEvolutionModal();
+});
+
+const SITE_COLORS = { "enter.online": "#58a6ff", "xstore.md": "#ffa657" };
+
+function closeEvolutionModal() {
+  document.getElementById("evoModal").classList.remove("open");
+}
+
+function openEvolutionModal(fingerprintKey, specLabel) {
+  document.getElementById("evoTitle").textContent = specLabel;
+
+  // adunam pretul acestei configuratii, per site, pentru fiecare zi disponibila
+  const bySite = new Map(); // site -> [{day, pret}]
+  const days = [...sortedDays].reverse(); // cronologic, cel mai vechi primul
+
+  for (const day of days) {
+    const dayMap = dayIndex.get(day);
+    if (!dayMap) continue;
+    for (const item of dayMap.values()) {
+      if (item.fp.fingerprint_key !== fingerprintKey) continue;
+      if (!bySite.has(item.raw.site)) bySite.set(item.raw.site, []);
+      bySite.get(item.raw.site).push({ day, pret: item.raw.pret });
+    }
+  }
+
+  document.getElementById("evoSub").textContent =
+    days.length > 0 ? `${days[0]} → ${days[days.length - 1]}` : "";
+
+  document.getElementById("evoChartWrap").innerHTML = renderEvoChart(bySite, days);
+
+  const legend = document.getElementById("evoLegend");
+  legend.innerHTML = Array.from(bySite.keys()).map(site => `
+    <span><span class="dot" style="background:${SITE_COLORS[site] || "#8b949e"};"></span>${site}</span>
+  `).join("");
+
+  document.getElementById("evoModal").classList.add("open");
+}
+
+function renderEvoChart(bySite, days) {
+  const W = 640, H = 260, padL = 60, padR = 20, padT = 20, padB = 30;
+
+  let allPrices = [];
+  for (const series of bySite.values()) allPrices.push(...series.map(p => p.pret));
+  if (allPrices.length === 0) return `<div class="empty-state" style="padding:30px;">Nu avem suficiente date pentru grafic.</div>`;
+
+  const minP = Math.min(...allPrices) * 0.97;
+  const maxP = Math.max(...allPrices) * 1.03;
+  const xFor = (dayIdx) => padL + (dayIdx / Math.max(1, days.length - 1)) * (W - padL - padR);
+  const yFor = (price) => padT + (1 - (price - minP) / (maxP - minP)) * (H - padT - padB);
+
+  let svg = `<svg viewBox="0 0 ${W} ${H}" style="width:100%; height:auto;">`;
+
+  // linii de grid orizontale + etichete pret
+  for (let i = 0; i <= 3; i++) {
+    const p = minP + (i / 3) * (maxP - minP);
+    const y = yFor(p);
+    svg += `<line x1="${padL}" y1="${y}" x2="${W - padR}" y2="${y}" stroke="#30363d" stroke-width="1"/>`;
+    svg += `<text x="${padL - 8}" y="${y + 4}" text-anchor="end" font-size="10" fill="#8b949e" font-family="JetBrains Mono, monospace">${Math.round(p).toLocaleString("ro-RO")}</text>`;
+  }
+
+  // etichete zile (prima, mijloc, ultima)
+  const dayTickIdxs = days.length > 1 ? [0, Math.floor((days.length - 1) / 2), days.length - 1] : [0];
+  dayTickIdxs.forEach(idx => {
+    svg += `<text x="${xFor(idx)}" y="${H - 8}" text-anchor="middle" font-size="10" fill="#8b949e" font-family="JetBrains Mono, monospace">${days[idx]?.slice(5) || ""}</text>`;
+  });
+
+  for (const [site, series] of bySite.entries()) {
+    const color = SITE_COLORS[site] || "#8b949e";
+    const points = series.map(p => {
+      const dayIdx = days.indexOf(p.day);
+      return `${xFor(dayIdx)},${yFor(p.pret)}`;
+    }).join(" ");
+    svg += `<polyline points="${points}" fill="none" stroke="${color}" stroke-width="2"/>`;
+    series.forEach(p => {
+      const dayIdx = days.indexOf(p.day);
+      svg += `<circle cx="${xFor(dayIdx)}" cy="${yFor(p.pret)}" r="3" fill="${color}"/>`;
+    });
+  }
+
+  svg += `</svg>`;
+  return svg;
+}
 
 async function init() {
   try {
@@ -723,6 +961,7 @@ async function init() {
     document.getElementById("allDate").innerHTML = dateOptions;
     document.getElementById("compareDate").innerHTML = dateOptions;
     document.getElementById("changesDate").innerHTML = dateOptions;
+    document.getElementById("topgpuDate").innerHTML = dateOptions;
 
     const latestScrape = allItems.reduce((max, i) =>
       new Date(i.raw.scraped_at) > new Date(max) ? i.raw.scraped_at : max, allItems[0]?.raw.scraped_at || "");
@@ -733,6 +972,7 @@ async function init() {
     renderCompare();
     renderAll();
     renderChanges();
+    renderTopGpu();
   } catch (err) {
     document.getElementById("subtitle").textContent = "Eroare la încărcarea datelor.";
     document.getElementById("compareList").innerHTML =
