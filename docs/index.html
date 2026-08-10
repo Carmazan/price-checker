@@ -1,0 +1,522 @@
+<!DOCTYPE html>
+<html lang="ro">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Comparație Prețuri PC Gaming</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0d1117;
+    --surface: #161b22;
+    --surface-hover: #1c2129;
+    --border: #30363d;
+    --accent: #58a6ff;
+    --good: #3fb950;
+    --bad: #f85149;
+    --text: #e6edf3;
+    --muted: #8b949e;
+    --mono: 'JetBrains Mono', monospace;
+    --sans: 'Inter', sans-serif;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    min-height: 100vh;
+  }
+
+  header {
+    border-bottom: 1px solid var(--border);
+    padding: 20px 24px;
+    position: sticky;
+    top: 0;
+    background: var(--bg);
+    z-index: 10;
+  }
+
+  header h1 {
+    font-family: var(--mono);
+    font-size: 18px;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  header h1::before {
+    content: "";
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--good);
+    display: inline-block;
+    box-shadow: 0 0 8px var(--good);
+  }
+
+  header .subtitle {
+    color: var(--muted);
+    font-size: 13px;
+    margin-top: 4px;
+  }
+
+  nav.tabs {
+    display: flex;
+    gap: 4px;
+    padding: 0 24px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg);
+    position: sticky;
+    top: 73px;
+    z-index: 10;
+  }
+
+  nav.tabs button {
+    background: none;
+    border: none;
+    color: var(--muted);
+    padding: 12px 16px;
+    font-family: var(--sans);
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    transition: color 0.15s, border-color 0.15s;
+  }
+
+  nav.tabs button:hover { color: var(--text); }
+
+  nav.tabs button.active {
+    color: var(--accent);
+    border-bottom-color: var(--accent);
+  }
+
+  main { padding: 20px 24px 60px; max-width: 1400px; margin: 0 auto; }
+
+  .filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-bottom: 20px;
+  }
+
+  .filters input, .filters select {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 8px 12px;
+    border-radius: 6px;
+    font-family: var(--sans);
+    font-size: 13px;
+  }
+
+  .filters input:focus, .filters select:focus {
+    outline: none;
+    border-color: var(--accent);
+  }
+
+  .filters input[type="text"] { min-width: 220px; flex: 1; }
+
+  .status-line {
+    color: var(--muted);
+    font-size: 12px;
+    font-family: var(--mono);
+    margin-bottom: 16px;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+
+  thead th {
+    text-align: left;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border);
+    color: var(--muted);
+    font-weight: 600;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    cursor: pointer;
+    user-select: none;
+    white-space: nowrap;
+  }
+
+  thead th:hover { color: var(--text); }
+
+  tbody tr {
+    border-bottom: 1px solid var(--border);
+    transition: background 0.1s;
+  }
+
+  tbody tr:hover { background: var(--surface-hover); }
+
+  tbody td { padding: 10px 12px; vertical-align: middle; }
+
+  .site-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 600;
+  }
+
+  .site-enter { background: rgba(88,166,255,0.15); color: #58a6ff; }
+  .site-xstore { background: rgba(255,166,87,0.15); color: #ffa657; }
+
+  .price { font-family: var(--mono); font-weight: 600; }
+  .price-old { font-family: var(--mono); color: var(--muted); text-decoration: line-through; font-size: 12px; }
+
+  .prod-title { max-width: 320px; }
+  .prod-link { color: var(--text); text-decoration: none; }
+  .prod-link:hover { color: var(--accent); }
+  .prod-spec { color: var(--muted); font-size: 11px; margin-top: 2px; font-family: var(--mono); }
+
+  .delta-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-family: var(--mono);
+    font-size: 12px;
+    font-weight: 700;
+    padding: 3px 10px;
+    border-radius: 20px;
+  }
+
+  .delta-good { background: rgba(63,185,80,0.15); color: var(--good); }
+  .delta-bad { background: rgba(248,81,73,0.15); color: var(--bad); }
+  .delta-none { background: rgba(139,148,158,0.15); color: var(--muted); }
+
+  .compare-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px;
+    margin-bottom: 12px;
+  }
+
+  .compare-head { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px; gap: 12px; }
+  .compare-title { font-size: 14px; font-weight: 600; }
+  .compare-spec { color: var(--muted); font-size: 12px; font-family: var(--mono); margin-top: 4px; }
+
+  .compare-sites { display: flex; gap: 12px; flex-wrap: wrap; }
+
+  .compare-site-box {
+    flex: 1;
+    min-width: 200px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 12px;
+  }
+
+  .compare-site-box.cheapest { border-color: var(--good); }
+
+  .empty-state {
+    text-align: center;
+    padding: 60px 20px;
+    color: var(--muted);
+  }
+
+  .empty-state .big { font-family: var(--mono); font-size: 32px; margin-bottom: 8px; }
+
+  @media (max-width: 640px) {
+    .prod-title { max-width: 160px; }
+    table { font-size: 12px; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>PRICE_COMPARE // enter.online × xstore.md</h1>
+  <div class="subtitle" id="subtitle">Se încarcă...</div>
+</header>
+
+<nav class="tabs">
+  <button class="active" data-tab="compare">Comparație</button>
+  <button data-tab="all">Toate produsele</button>
+</nav>
+
+<main>
+
+  <div id="tab-compare">
+    <div class="filters">
+      <input type="text" id="compareSearch" placeholder="Caută după CPU, GPU...">
+      <select id="compareSort">
+        <option value="diff-desc">Diferență preț: mare → mică</option>
+        <option value="diff-asc">Diferență preț: mică → mare</option>
+      </select>
+    </div>
+    <div class="status-line" id="compareStatus"></div>
+    <div id="compareList"></div>
+  </div>
+
+  <div id="tab-all" style="display:none;">
+    <div class="filters">
+      <input type="text" id="allSearch" placeholder="Caută produs, CPU, GPU...">
+      <select id="allSite">
+        <option value="">Toate site-urile</option>
+        <option value="enter.online">enter.online</option>
+        <option value="xstore.md">xstore.md</option>
+      </select>
+      <select id="allSort">
+        <option value="pret-asc">Preț: crescător</option>
+        <option value="pret-desc">Preț: descrescător</option>
+        <option value="date-desc">Cel mai recent</option>
+      </select>
+    </div>
+    <div class="status-line" id="allStatus"></div>
+    <table>
+      <thead>
+        <tr>
+          <th>Site</th>
+          <th>Produs</th>
+          <th>Preț</th>
+          <th>Cashback</th>
+          <th>Stoc</th>
+        </tr>
+      </thead>
+      <tbody id="allTableBody"></tbody>
+    </table>
+  </div>
+
+</main>
+
+<script>
+const SUPABASE_URL = "https://bvnhkkcwbfzulqmhphjy.supabase.co";
+const SUPABASE_KEY = "sb_publishable_tzT-4L_4WLdkN_WGa74zIQ_75e719db";
+
+const HEADERS = {
+  apikey: SUPABASE_KEY,
+  Authorization: `Bearer ${SUPABASE_KEY}`,
+};
+
+let allItems = [];   // deduplicat, cel mai recent per (site, link)
+let groups = {};     // fingerprint_key -> [items]
+
+function formatPrice(n) {
+  if (n === null || n === undefined) return "—";
+  return Math.round(n).toLocaleString("ro-RO") + " lei";
+}
+
+function formatDate(iso) {
+  const d = new Date(iso);
+  return d.toLocaleDateString("ro-RO", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+}
+
+async function fetchData() {
+  const url = `${SUPABASE_URL}/rest/v1/products_fingerprint?select=fingerprint_key,cpu_model,gpu_model,ram_gb,ssd_gb,products_raw(site,titlu,cpu,gpu,ram,ssd,pret,pret_vechi,cashback,stoc,link,scraped_at)&order=raw_id.desc&limit=8000`;
+  const res = await fetch(url, { headers: HEADERS });
+  if (!res.ok) throw new Error(`Supabase a raspuns cu ${res.status}`);
+  return res.json();
+}
+
+function dedupe(rows) {
+  const seen = new Map();
+  for (const row of rows) {
+    const raw = row.products_raw;
+    if (!raw || !raw.pret) continue;
+    const key = raw.site + "|" + raw.link;
+    const existing = seen.get(key);
+    if (!existing || new Date(raw.scraped_at) > new Date(existing.raw.scraped_at)) {
+      seen.set(key, { raw, fp: row });
+    }
+  }
+  return Array.from(seen.values());
+}
+
+function buildGroups(items) {
+  const g = {};
+  for (const item of items) {
+    const key = item.fp.fingerprint_key;
+    if (!key || key.includes("unknown")) continue;
+    if (!g[key]) g[key] = [];
+    g[key].push(item);
+  }
+  // pastram doar grupurile cu 2+ site-uri diferite
+  const filtered = {};
+  for (const [key, arr] of Object.entries(g)) {
+    const sites = new Set(arr.map(i => i.raw.site));
+    if (sites.size >= 2) filtered[key] = arr;
+  }
+  return filtered;
+}
+
+function renderCompare() {
+  const search = document.getElementById("compareSearch").value.toLowerCase();
+  const sortMode = document.getElementById("compareSort").value;
+
+  let entries = Object.entries(groups);
+
+  entries = entries.map(([key, arr]) => {
+    const sorted = [...arr].sort((a, b) => a.raw.pret - b.raw.pret);
+    const cheapest = sorted[0];
+    const priciest = sorted[sorted.length - 1];
+    const diff = priciest.raw.pret - cheapest.raw.pret;
+    const diffPct = cheapest.raw.pret ? (diff / cheapest.raw.pret) * 100 : 0;
+    return { key, arr: sorted, diff, diffPct };
+  });
+
+  if (search) {
+    entries = entries.filter(({ arr }) =>
+      arr.some(i =>
+        (i.raw.titlu || "").toLowerCase().includes(search) ||
+        (i.fp.cpu_model || "").toLowerCase().includes(search) ||
+        (i.fp.gpu_model || "").toLowerCase().includes(search)
+      )
+    );
+  }
+
+  entries.sort((a, b) => sortMode === "diff-desc" ? b.diff - a.diff : a.diff - b.diff);
+
+  const list = document.getElementById("compareList");
+  document.getElementById("compareStatus").textContent =
+    `${entries.length} configurații găsite pe ambele site-uri`;
+
+  if (entries.length === 0) {
+    list.innerHTML = `<div class="empty-state"><div class="big">∅</div>Nicio configurație identică găsită încă pe ambele site-uri.</div>`;
+    return;
+  }
+
+  list.innerHTML = entries.map(({ arr, diff, diffPct }) => {
+    const first = arr[0];
+    const specLine = [
+      first.fp.cpu_model, first.fp.gpu_model,
+      first.fp.ram_gb ? first.fp.ram_gb + "GB RAM" : null,
+      first.fp.ssd_gb ? first.fp.ssd_gb + "GB SSD" : null,
+    ].filter(Boolean).join(" · ");
+
+    const minPrice = arr[0].raw.pret;
+
+    const sitesHtml = arr.map(item => {
+      const isCheapest = item.raw.pret === minPrice;
+      const siteClass = item.raw.site === "enter.online" ? "site-enter" : "site-xstore";
+      return `
+        <div class="compare-site-box ${isCheapest ? "cheapest" : ""}">
+          <span class="site-badge ${siteClass}">${item.raw.site}</span>
+          <div style="margin-top:8px;">
+            ${item.raw.pret_vechi ? `<div class="price-old">${formatPrice(item.raw.pret_vechi)}</div>` : ""}
+            <div class="price" style="font-size:16px;">${formatPrice(item.raw.pret)}</div>
+          </div>
+          <div style="margin-top:6px; color:var(--muted); font-size:11px;">
+            <a class="prod-link" href="${item.raw.link}" target="_blank" rel="noopener">${item.raw.titlu}</a>
+          </div>
+          ${item.raw.cashback ? `<div style="margin-top:4px; font-size:11px; color:var(--good);">Cashback ${formatPrice(item.raw.cashback)}</div>` : ""}
+        </div>`;
+    }).join("");
+
+    const deltaClass = diff > 0 ? "delta-bad" : "delta-none";
+
+    return `
+      <div class="compare-card">
+        <div class="compare-head">
+          <div>
+            <div class="compare-title">${specLine || "Configurație"}</div>
+          </div>
+          <span class="delta-chip ${deltaClass}">
+            ${diff > 0 ? "Δ " + formatPrice(diff) + " · " + diffPct.toFixed(1) + "%" : "preț egal"}
+          </span>
+        </div>
+        <div class="compare-sites">${sitesHtml}</div>
+      </div>`;
+  }).join("");
+}
+
+function renderAll() {
+  const search = document.getElementById("allSearch").value.toLowerCase();
+  const siteFilter = document.getElementById("allSite").value;
+  const sortMode = document.getElementById("allSort").value;
+
+  let items = [...allItems];
+
+  if (siteFilter) items = items.filter(i => i.raw.site === siteFilter);
+
+  if (search) {
+    items = items.filter(i =>
+      (i.raw.titlu || "").toLowerCase().includes(search) ||
+      (i.fp.cpu_model || "").toLowerCase().includes(search) ||
+      (i.fp.gpu_model || "").toLowerCase().includes(search)
+    );
+  }
+
+  items.sort((a, b) => {
+    if (sortMode === "pret-asc") return (a.raw.pret || 0) - (b.raw.pret || 0);
+    if (sortMode === "pret-desc") return (b.raw.pret || 0) - (a.raw.pret || 0);
+    return new Date(b.raw.scraped_at) - new Date(a.raw.scraped_at);
+  });
+
+  document.getElementById("allStatus").textContent = `${items.length} produse`;
+
+  const tbody = document.getElementById("allTableBody");
+  tbody.innerHTML = items.map(item => {
+    const raw = item.raw;
+    const siteClass = raw.site === "enter.online" ? "site-enter" : "site-xstore";
+    const specLine = [raw.cpu, raw.gpu, raw.ram, raw.ssd].filter(Boolean).join(" · ");
+    return `
+      <tr>
+        <td><span class="site-badge ${siteClass}">${raw.site}</span></td>
+        <td class="prod-title">
+          <a class="prod-link" href="${raw.link}" target="_blank" rel="noopener">${raw.titlu}</a>
+          ${specLine ? `<div class="prod-spec">${specLine}</div>` : ""}
+        </td>
+        <td>
+          ${raw.pret_vechi ? `<div class="price-old">${formatPrice(raw.pret_vechi)}</div>` : ""}
+          <div class="price">${formatPrice(raw.pret)}</div>
+        </td>
+        <td>${raw.cashback ? formatPrice(raw.cashback) : "—"}</td>
+        <td style="color:var(--muted); font-size:11px;">${formatDate(raw.scraped_at)}</td>
+      </tr>`;
+  }).join("");
+}
+
+function switchTab(tab) {
+  document.querySelectorAll("nav.tabs button").forEach(b => b.classList.toggle("active", b.dataset.tab === tab));
+  document.getElementById("tab-compare").style.display = tab === "compare" ? "block" : "none";
+  document.getElementById("tab-all").style.display = tab === "all" ? "block" : "none";
+}
+
+document.querySelectorAll("nav.tabs button").forEach(btn => {
+  btn.addEventListener("click", () => switchTab(btn.dataset.tab));
+});
+
+["compareSearch", "compareSort"].forEach(id =>
+  document.getElementById(id).addEventListener("input", renderCompare));
+["allSearch", "allSite", "allSort"].forEach(id =>
+  document.getElementById(id).addEventListener("input", renderAll));
+
+async function init() {
+  try {
+    const raw = await fetchData();
+    allItems = dedupe(raw);
+    groups = buildGroups(allItems);
+
+    const latestScrape = allItems.reduce((max, i) =>
+      new Date(i.raw.scraped_at) > new Date(max) ? i.raw.scraped_at : max, allItems[0]?.raw.scraped_at || "");
+
+    document.getElementById("subtitle").textContent =
+      `${allItems.length} produse active · ultima actualizare: ${latestScrape ? formatDate(latestScrape) : "—"}`;
+
+    renderCompare();
+    renderAll();
+  } catch (err) {
+    document.getElementById("subtitle").textContent = "Eroare la încărcarea datelor.";
+    document.getElementById("compareList").innerHTML =
+      `<div class="empty-state"><div class="big">!</div>${err.message}</div>`;
+    console.error(err);
+  }
+}
+
+init();
+</script>
+
+</body>
+</html>
