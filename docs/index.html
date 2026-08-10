@@ -292,6 +292,8 @@
       <select id="compareSort">
         <option value="diff-desc">Diferență preț: mare → mică</option>
         <option value="diff-asc">Diferență preț: mică → mare</option>
+        <option value="pret-asc">Preț (cel mai ieftin): crescător</option>
+        <option value="pret-desc">Preț (cel mai ieftin): descrescător</option>
       </select>
     </div>
     <div class="status-line" id="compareStatus"></div>
@@ -330,6 +332,7 @@
 
   <div id="tab-changes" style="display:none;">
     <div class="filters">
+      <select id="changesDate"></select>
       <select id="changesSite">
         <option value="">Toate site-urile</option>
         <option value="enter.online">enter.online</option>
@@ -429,12 +432,13 @@ function findCompetitor(fingerprintKey, ownSite, dayMap) {
   return null;
 }
 
-function computeChanges() {
+function computeChanges(selectedDay) {
   const days = sortedDays;
   if (days.length < 1) return { today: null, yesterday: null, added: [], removed: [], changed: [] };
 
-  const today = days[0];
-  const yesterday = days.length > 1 ? days[1] : null;
+  const today = selectedDay && dayIndex.has(selectedDay) ? selectedDay : days[0];
+  const idx = days.indexOf(today);
+  const yesterday = idx !== -1 && idx + 1 < days.length ? days[idx + 1] : null;
 
   const todayMap = dayIndex.get(today);
   const yesterdayMap = yesterday ? dayIndex.get(yesterday) : new Map();
@@ -463,7 +467,8 @@ function computeChanges() {
 
 function renderChanges() {
   const siteFilter = document.getElementById("changesSite").value;
-  const { today, yesterday, added, removed, changed, todayMap } = computeChanges();
+  const dateFilter = document.getElementById("changesDate").value;
+  const { today, yesterday, added, removed, changed, todayMap } = computeChanges(dateFilter);
   const statusEl = document.getElementById("changesStatus");
 
   if (!today) {
@@ -567,7 +572,7 @@ function renderCompare() {
     const priciest = sorted[sorted.length - 1];
     const diff = priciest.raw.pret - cheapest.raw.pret;
     const diffPct = cheapest.raw.pret ? (diff / cheapest.raw.pret) * 100 : 0;
-    return { key, arr: sorted, diff, diffPct };
+    return { key, arr: sorted, diff, diffPct, minPret: cheapest.raw.pret };
   });
 
   if (search) {
@@ -580,7 +585,11 @@ function renderCompare() {
     );
   }
 
-  entries.sort((a, b) => sortMode === "diff-desc" ? b.diff - a.diff : a.diff - b.diff);
+  entries.sort((a, b) => {
+    if (sortMode === "pret-asc") return a.minPret - b.minPret;
+    if (sortMode === "pret-desc") return b.minPret - a.minPret;
+    return sortMode === "diff-desc" ? b.diff - a.diff : a.diff - b.diff;
+  });
 
   const list = document.getElementById("compareList");
   document.getElementById("compareStatus").textContent =
@@ -699,7 +708,8 @@ document.querySelectorAll("nav.tabs button").forEach(btn => {
   document.getElementById(id).addEventListener("input", renderCompare));
 ["allSearch", "allSite", "allSort", "allDate"].forEach(id =>
   document.getElementById(id).addEventListener("input", renderAll));
-document.getElementById("changesSite").addEventListener("input", renderChanges);
+["changesSite", "changesDate"].forEach(id =>
+  document.getElementById(id).addEventListener("input", renderChanges));
 
 async function init() {
   try {
@@ -712,6 +722,7 @@ async function init() {
       `<option value="${d}">${d}${i === 0 ? " (cel mai recent)" : ""}</option>`).join("");
     document.getElementById("allDate").innerHTML = dateOptions;
     document.getElementById("compareDate").innerHTML = dateOptions;
+    document.getElementById("changesDate").innerHTML = dateOptions;
 
     const latestScrape = allItems.reduce((max, i) =>
       new Date(i.raw.scraped_at) > new Date(max) ? i.raw.scraped_at : max, allItems[0]?.raw.scraped_at || "");
