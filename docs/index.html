@@ -228,6 +228,41 @@
 
   .empty-state .big { font-family: var(--mono); font-size: 32px; margin-bottom: 8px; }
 
+  .change-section { margin-bottom: 28px; }
+
+  .change-section h2 {
+    font-family: var(--mono);
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--muted);
+    margin-bottom: 10px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .change-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 10px 14px;
+    margin-bottom: 6px;
+  }
+
+  .change-row .change-info { min-width: 0; }
+  .change-row .change-info .t { font-size: 13px; }
+  .change-row .change-info .s { font-size: 11px; color: var(--muted); font-family: var(--mono); margin-top: 2px; }
+  .change-row .change-price { text-align: right; white-space: nowrap; }
+
+  .dot-new { color: var(--good); }
+  .dot-gone { color: var(--bad); }
+  .dot-change { color: var(--accent); }
+
   @media (max-width: 640px) {
     .prod-title { max-width: 160px; }
     table { font-size: 12px; }
@@ -244,6 +279,7 @@
 <nav class="tabs">
   <button class="active" data-tab="compare">Comparație</button>
   <button data-tab="all">Toate produsele</button>
+  <button data-tab="changes">Modificări</button>
 </nav>
 
 <main>
@@ -289,6 +325,22 @@
     </table>
   </div>
 
+  <div id="tab-changes" style="display:none;">
+    <div class="status-line" id="changesStatus"></div>
+    <div class="change-section">
+      <h2><span class="dot-new">●</span> PC-uri noi</h2>
+      <div id="changesNew"></div>
+    </div>
+    <div class="change-section">
+      <h2><span class="dot-change">●</span> Modificări de preț</h2>
+      <div id="changesPrice"></div>
+    </div>
+    <div class="change-section">
+      <h2><span class="dot-gone">●</span> PC-uri dispărute (nu mai apar în ultimul scraping)</h2>
+      <div id="changesGone"></div>
+    </div>
+  </div>
+
 </main>
 
 <script>
@@ -314,7 +366,7 @@ function formatDate(iso) {
 }
 
 async function fetchData() {
-  const url = `${SUPABASE_URL}/rest/v1/products_fingerprint?select=fingerprint_key,cpu_model,gpu_model,ram_gb,ssd_gb,products_raw(site,titlu,cpu,gpu,ram,ssd,pret,pret_vechi,cashback,stoc,link,scraped_at)&order=raw_id.desc&limit=8000`;
+  const url = `${SUPABASE_URL}/rest/v1/products_fingerprint?select=fingerprint_key,cpu_model,gpu_model,ram_gb,ssd_gb,products_raw(site,titlu,cpu,gpu,ram,ssd,pret,pret_vechi,cashback,stoc,link,scraped_at)&order=raw_id.desc&limit=12000`;
   const res = await fetch(url, { headers: HEADERS });
   if (!res.ok) throw new Error(`Supabase a raspuns cu ${res.status}`);
   return res.json();
@@ -332,6 +384,114 @@ function dedupe(rows) {
     }
   }
   return Array.from(seen.values());
+}
+
+function dayStr(iso) {
+  return iso.slice(0, 10);
+}
+
+function buildChanges(rawRows) {
+  // pentru fiecare (site,link,zi) pastram cea mai recenta inregistrare din ziua respectiva
+  const byDay = new Map(); // day -> Map(site|link -> {raw, fp})
+
+  for (const row of rawRows) {
+    const raw = row.products_raw;
+    if (!raw || !raw.pret) continue;
+    const day = dayStr(raw.scraped_at);
+    const key = raw.site + "|" + raw.link;
+    if (!byDay.has(day)) byDay.set(day, new Map());
+    const dayMap = byDay.get(day);
+    const existing = dayMap.get(key);
+    if (!existing || new Date(raw.scraped_at) > new Date(existing.raw.scraped_at)) {
+      dayMap.set(key, { raw, fp: row });
+    }
+  }
+
+  const days = Array.from(byDay.keys()).sort().reverse();
+  if (days.length < 1) return { today: null, yesterday: null, added: [], removed: [], changed: [] };
+
+  const today = days[0];
+  const yesterday = days.length > 1 ? days[1] : null;
+
+  const todayMap = byDay.get(today);
+  const yesterdayMap = yesterday ? byDay.get(yesterday) : new Map();
+
+  const added = [];
+  const removed = [];
+  const changed = [];
+
+  for (const [key, item] of todayMap.entries()) {
+    if (!yesterdayMap.has(key)) {
+      added.push(item);
+    } else {
+      const prev = yesterdayMap.get(key);
+      if (prev.raw.pret !== item.raw.pret) {
+        changed.push({ item, prevPret: prev.raw.pret });
+      }
+    }
+  }
+
+  for (const [key, item] of yesterdayMap.entries()) {
+    if (!todayMap.has(key)) removed.push(item);
+  }
+
+  return { today, yesterday, added, removed, changed };
+}
+
+function renderChanges(rawRows) {
+  const { today, yesterday, added, removed, changed } = buildChanges(rawRows);
+  const statusEl = document.getElementById("changesStatus");
+
+  if (!yesterday) {
+    statusEl.textContent = `Avem date doar pentru o singură zi (${today || "—"}) — comparația apare de mâine.`;
+  } else {
+    statusEl.textContent = `Comparație: ${yesterday} → ${today}`;
+  }
+
+  const siteClass = s => s === "enter.online" ? "site-enter" : "site-xstore";
+
+  const newEl = document.getElementById("changesNew");
+  newEl.innerHTML = added.length === 0
+    ? `<div class="empty-state" style="padding:20px;">Niciun PC nou.</div>`
+    : added.map(({ raw }) => `
+        <div class="change-row">
+          <div class="change-info">
+            <span class="site-badge ${siteClass(raw.site)}">${raw.site}</span>
+            <div class="t"><a class="prod-link" href="${raw.link}" target="_blank" rel="noopener">${raw.titlu}</a></div>
+          </div>
+          <div class="change-price price">${formatPrice(raw.pret)}</div>
+        </div>`).join("");
+
+  const priceEl = document.getElementById("changesPrice");
+  priceEl.innerHTML = changed.length === 0
+    ? `<div class="empty-state" style="padding:20px;">Niciun preț schimbat.</div>`
+    : changed.map(({ item, prevPret }) => {
+        const raw = item.raw;
+        const diff = raw.pret - prevPret;
+        const cls = diff < 0 ? "delta-good" : "delta-bad";
+        const sign = diff > 0 ? "+" : "";
+        return `
+        <div class="change-row">
+          <div class="change-info">
+            <span class="site-badge ${siteClass(raw.site)}">${raw.site}</span>
+            <div class="t"><a class="prod-link" href="${raw.link}" target="_blank" rel="noopener">${raw.titlu}</a></div>
+            <div class="s">${formatPrice(prevPret)} → ${formatPrice(raw.pret)}</div>
+          </div>
+          <span class="delta-chip ${cls}">${sign}${formatPrice(diff)}</span>
+        </div>`;
+      }).join("");
+
+  const goneEl = document.getElementById("changesGone");
+  goneEl.innerHTML = removed.length === 0
+    ? `<div class="empty-state" style="padding:20px;">Niciun PC dispărut.</div>`
+    : removed.map(({ raw }) => `
+        <div class="change-row">
+          <div class="change-info">
+            <span class="site-badge ${siteClass(raw.site)}">${raw.site}</span>
+            <div class="t"><a class="prod-link" href="${raw.link}" target="_blank" rel="noopener">${raw.titlu}</a></div>
+          </div>
+          <div class="change-price price" style="color:var(--muted);">${formatPrice(raw.pret)}</div>
+        </div>`).join("");
 }
 
 function buildGroups(items) {
@@ -482,6 +642,7 @@ function switchTab(tab) {
   document.querySelectorAll("nav.tabs button").forEach(b => b.classList.toggle("active", b.dataset.tab === tab));
   document.getElementById("tab-compare").style.display = tab === "compare" ? "block" : "none";
   document.getElementById("tab-all").style.display = tab === "all" ? "block" : "none";
+  document.getElementById("tab-changes").style.display = tab === "changes" ? "block" : "none";
 }
 
 document.querySelectorAll("nav.tabs button").forEach(btn => {
@@ -507,6 +668,7 @@ async function init() {
 
     renderCompare();
     renderAll();
+    renderChanges(raw);
   } catch (err) {
     document.getElementById("subtitle").textContent = "Eroare la încărcarea datelor.";
     document.getElementById("compareList").innerHTML =
