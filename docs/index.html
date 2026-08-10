@@ -732,7 +732,7 @@ function renderCompare() {
     return;
   }
 
-  list.innerHTML = entries.map(({ arr, diff, diffPct }) => {
+  list.innerHTML = entries.map(({ key, arr, diff, diffPct }) => {
     const first = arr[0];
     const specLine = [
       first.fp.cpu_model, first.fp.gpu_model,
