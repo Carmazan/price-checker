@@ -49,7 +49,11 @@ def normalize_cpu(text):
     for pattern in CPU_PATTERNS:
         match = re.search(pattern, text, re.IGNORECASE)
         if match:
-            return re.sub(r"\s+", " ", match.group(1)).strip().upper()
+            value = match.group(1).upper()
+            # unificam separatorul: cratima -> spatiu, apoi colapsam spatiile
+            value = value.replace("-", " ")
+            value = re.sub(r"\s+", " ", value).strip()
+            return value
     return None
 
 
@@ -57,8 +61,10 @@ def normalize_gpu(text):
     for pattern in GPU_PATTERNS:
         match = re.search(pattern, text, re.IGNORECASE)
         if match:
-            value = re.sub(r"\s+", " ", match.group(1)).strip().upper()
-            value = value.replace("RTX ", "RTX").replace("RX ", "RX")
+            value = match.group(1).upper()
+            # eliminam TOATE spatiile: unele site-uri scriu "RTX 5060 TI",
+            # altele "RTX5060TI" - trebuie sa ajunga identice
+            value = re.sub(r"\s+", "", value)
             return value
     return None
 
