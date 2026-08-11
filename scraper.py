@@ -504,7 +504,9 @@ def verify_darwin_stock(page, candidates):
                     print(f"  [diagnostic] 'Magazin Online' gasit, dar regex nu s-a potrivit. Snippet: {snippet!r}")
                 print(f"  Darwin: primul produs fara stoc la pozitia {checked}, opresc verificarea.")
                 break
-        except Exception:
+        except Exception as e:
+            print(f"  [diagnostic] Eroare la produsul {checked}: {type(e).__name__}: {e}")
+            print(f"  [diagnostic] Link: {link}")
             print(f"  Darwin: eroare la verificarea produsului {checked}, opresc verificarea.")
             break
 
