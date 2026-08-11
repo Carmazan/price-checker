@@ -8,9 +8,18 @@ Necesita variabile de mediu: SUPABASE_URL, SUPABASE_KEY
 
 import os
 import re
+import sys
 import time
 import requests
 from playwright.sync_api import sync_playwright
+
+# Windows CMD foloseste implicit un codec (cp1252) care nu poate afisa toate
+# caracterele Unicode din textul paginilor - fara asta, orice print() cu un
+# caracter "neobisnuit" (chiar si diacritice romanesti in unele configuratii)
+# putea opri scriptul cu UnicodeEncodeError.
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 
 SUPABASE_URL = os.environ["SUPABASE_URL"].rstrip("/")
@@ -370,6 +379,9 @@ def scrape_darwin(page, category_path="gaming/sisteme-pc", max_pages=30):
                 if (seen.has(href)) continue;
                 const cardText = (a.innerText || '').trim();
                 if (!cardText) continue;
+                // pagina de categorie include si linkuri spre produse conexe
+                // (ex. casti, accesorii) - le excludem, pastram doar PC-urile
+                if (!/^Calculator/i.test(cardText)) continue;
                 seen.add(href);
 
                 let node = a;
