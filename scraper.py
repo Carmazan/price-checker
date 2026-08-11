@@ -494,11 +494,14 @@ def verify_darwin_stock(page, candidates):
 
         try:
             page.goto(link, wait_until="domcontentloaded")
+            page.wait_for_timeout(400)
+            # sectiunea de disponibilitate se incarca lazy, mai jos pe pagina
+            page.mouse.wheel(0, 1200)
             try:
-                page.wait_for_selector("text=Magazin Online", timeout=6000)
+                page.wait_for_selector("text=Disponibilitate", timeout=8000)
             except Exception:
                 pass
-            page.wait_for_timeout(300)
+            page.wait_for_timeout(500)
 
             text = page.locator("body").inner_text()
 
