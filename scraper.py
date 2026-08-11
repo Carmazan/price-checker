@@ -501,19 +501,26 @@ def verify_darwin_stock(page, candidates):
             page.wait_for_timeout(300)
 
             text = page.locator("body").inner_text()
-            match = re.search(r"Magazin Online\s*\n*\s*(În stoc|Stoc epuizat)", text)
+
+            # "Magazin Online" apare de 2 ori pe pagina: o data in footer
+            # (date de contact), o data la disponibilitatea reala a
+            # produsului. Cautam specific aparitia urmata de statusul de stoc.
+            match = None
+            for mo in re.finditer(r"Magazin Online", text):
+                tail = text[mo.end():mo.end() + 40]
+                stock_match = re.search(r"\s*\n*\s*(În stoc|Stoc epuizat)", tail)
+                if stock_match:
+                    match = stock_match
+                    break
 
             if match and match.group(1) == "În stoc":
                 verified.append(item)
             else:
-                mo_idx = text.find("Magazin Online")
-                if mo_idx == -1:
-                    print(f"  [diagnostic] 'Magazin Online' NU a fost gasit deloc in text la produsul {checked}.")
+                if match is None:
+                    print(f"  [diagnostic] Nicio aparitie 'Magazin Online' urmata de status de stoc, la produsul {checked}.")
                     print(f"  [diagnostic] Link: {link}")
-                    print(f"  [diagnostic] Primele 400 caractere: {text[:400]!r}")
                 else:
-                    snippet = text[mo_idx:mo_idx + 100]
-                    print(f"  [diagnostic] 'Magazin Online' gasit, dar regex nu s-a potrivit. Snippet: {snippet!r}")
+                    print(f"  [diagnostic] Status gasit: {match.group(1)!r} la produsul {checked}: {link}")
                 print(f"  Darwin: primul produs fara stoc la pozitia {checked}, opresc verificarea.")
                 break
         except Exception as e:
