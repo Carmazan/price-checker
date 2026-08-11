@@ -478,8 +478,12 @@ def scrape_darwin(page, category_path="gaming/sisteme-pc", max_pages=30):
 
 def verify_darwin_stock(page, candidates):
     # pagina de categorie darwin.md nu arata stocul real - trebuie verificat
-    # pe fiecare pagina de produs, sectiunea "Magazin Online" (diferita de
-    # disponibilitatea in magazinele fizice, care e aproape mereu "epuizat").
+    # pe fiecare pagina de produs. Structura difera intre produse:
+    # - in stoc: pret -> "Cumpara" -> (mult mai jos) sectiune "Disponibilitate"
+    # - epuizat: pret -> direct "Stoc epuizat" -> Cashback (fara sectiunea
+    #   de disponibilitate deloc)
+    # Cel mai sigur semnal: "Stoc epuizat" aparand IMEDIAT langa pret,
+    # inainte de "Cashback" - nu ne bazam pe sectiuni care uneori lipsesc.
     # Presupunem aceeasi ordine ca la enter.online: produsele active apar
     # primele in listare, deci ne oprim la primul produs fara stoc.
     verified = []
@@ -494,38 +498,21 @@ def verify_darwin_stock(page, candidates):
 
         try:
             page.goto(link, wait_until="domcontentloaded")
-            page.wait_for_timeout(400)
-            # sectiunea de disponibilitate se incarca lazy, mai jos pe pagina
-            page.mouse.wheel(0, 1200)
             try:
-                page.wait_for_selector("text=Disponibilitate", timeout=8000)
+                page.wait_for_selector("text=Cashback", timeout=6000)
             except Exception:
                 pass
-            page.wait_for_timeout(500)
+            page.wait_for_timeout(300)
 
             text = page.locator("body").inner_text()
+            cash_idx = text.find("Cashback")
+            window = text[max(0, cash_idx - 300):cash_idx] if cash_idx != -1 else text[:600]
 
-            # "Magazin Online" apare de 2 ori pe pagina: o data in footer
-            # (date de contact), o data la disponibilitatea reala a
-            # produsului. Cautam specific aparitia urmata de statusul de stoc.
-            match = None
-            for mo in re.finditer(r"Magazin Online", text):
-                tail = text[mo.end():mo.end() + 40]
-                stock_match = re.search(r"\s*\n*\s*(În stoc|Stoc epuizat)", tail)
-                if stock_match:
-                    match = stock_match
-                    break
-
-            if match and match.group(1) == "În stoc":
-                verified.append(item)
-            else:
-                if match is None:
-                    print(f"  [diagnostic] Nicio aparitie 'Magazin Online' urmata de status de stoc, la produsul {checked}.")
-                    print(f"  [diagnostic] Link: {link}")
-                else:
-                    print(f"  [diagnostic] Status gasit: {match.group(1)!r} la produsul {checked}: {link}")
-                print(f"  Darwin: primul produs fara stoc la pozitia {checked}, opresc verificarea.")
+            if "Stoc epuizat" in window:
+                print(f"  Darwin: primul produs fara stoc la pozitia {checked}: {link}")
                 break
+
+            verified.append(item)
         except Exception as e:
             print(f"  [diagnostic] Eroare la produsul {checked}: {type(e).__name__}: {e}")
             print(f"  [diagnostic] Link: {link}")
