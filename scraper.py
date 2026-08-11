@@ -459,7 +459,49 @@ def scrape_darwin(page, category_path="gaming/sisteme-pc", max_pages=30):
             print(f"  Darwin: nu am gasit buton/link pentru pagina {page_number + 1}, opresc.")
             break
 
+    print(f"  Darwin: {len(results)} produse gasite in listare, verific stocul real per produs...")
+    results = verify_darwin_stock(page, results)
     return results
+
+
+def verify_darwin_stock(page, candidates):
+    # pagina de categorie darwin.md nu arata stocul real - trebuie verificat
+    # pe fiecare pagina de produs, sectiunea "Magazin Online" (diferita de
+    # disponibilitatea in magazinele fizice, care e aproape mereu "epuizat").
+    # Presupunem aceeasi ordine ca la enter.online: produsele active apar
+    # primele in listare, deci ne oprim la primul produs fara stoc.
+    verified = []
+    total = len(candidates)
+    checked = 0
+
+    for idx, item in enumerate(candidates):
+        link = item["link"]
+        checked = idx + 1
+        if checked % 10 == 0 or idx == 0:
+            print(f"  Darwin stoc: verific {checked}/{total}")
+
+        try:
+            page.goto(link, wait_until="domcontentloaded")
+            try:
+                page.wait_for_selector("text=Magazin Online", timeout=6000)
+            except Exception:
+                pass
+            page.wait_for_timeout(300)
+
+            text = page.locator("body").inner_text()
+            match = re.search(r"Magazin Online\s*\n*\s*(În stoc|Stoc epuizat)", text)
+
+            if match and match.group(1) == "În stoc":
+                verified.append(item)
+            else:
+                print(f"  Darwin: primul produs fara stoc la pozitia {checked}, opresc verificarea.")
+                break
+        except Exception:
+            print(f"  Darwin: eroare la verificarea produsului {checked}, opresc verificarea.")
+            break
+
+    print(f"  Darwin: {len(verified)} produse confirmate in stoc (verificate {checked}/{total})")
+    return verified
 
 
 # ---------------------------------------------------------------------------
@@ -555,14 +597,12 @@ def main():
         xstore_results = scrape_xstore(page)
         print(f"  {len(xstore_results)} produse")
         all_results.extend(xstore_results)
+        time.sleep(2)
 
-        # darwin.md - dezactivat temporar (necesita verificare stoc per-produs,
-        # revenim la el ulterior). Cod pastrat mai jos in fisier, functia
-        # scrape_darwin() ramane disponibila.
-        # print("Scraping darwin.md...")
-        # darwin_results = scrape_darwin(page)
-        # print(f"  {len(darwin_results)} produse")
-        # all_results.extend(darwin_results)
+        print("Scraping darwin.md...")
+        darwin_results = scrape_darwin(page)
+        print(f"  {len(darwin_results)} produse")
+        all_results.extend(darwin_results)
 
         browser.close()
 
