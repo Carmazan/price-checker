@@ -494,6 +494,14 @@ def verify_darwin_stock(page, candidates):
             if match and match.group(1) == "În stoc":
                 verified.append(item)
             else:
+                mo_idx = text.find("Magazin Online")
+                if mo_idx == -1:
+                    print(f"  [diagnostic] 'Magazin Online' NU a fost gasit deloc in text la produsul {checked}.")
+                    print(f"  [diagnostic] Link: {link}")
+                    print(f"  [diagnostic] Primele 400 caractere: {text[:400]!r}")
+                else:
+                    snippet = text[mo_idx:mo_idx + 100]
+                    print(f"  [diagnostic] 'Magazin Online' gasit, dar regex nu s-a potrivit. Snippet: {snippet!r}")
                 print(f"  Darwin: primul produs fara stoc la pozitia {checked}, opresc verificarea.")
                 break
         except Exception:
