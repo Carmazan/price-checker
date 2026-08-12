@@ -385,28 +385,39 @@ def scrape_darwin(page, category_path="gaming/sisteme-pc", max_pages=30):
                 seen.add(href);
 
                 let node = a;
-                let prices = [];
+                let blockText = '';
                 for (let i = 0; i < 8; i++) {
                     node = node.parentElement;
                     if (!node) break;
-                    const text = node.innerText || '';
-                    const lines = text.split('\\n').map(l => l.trim()).filter(Boolean);
-                    const found = [];
+                    const t = node.innerText || '';
+                    if (t.includes('lei')) { blockText = t; break; }
+                }
+
+                // structura confirmata pe pagina reala:
+                // cu reducere:  "25 999 lei" -16% "-4 000 lei" "21 999 lei"
+                // fara reducere: doar "19 499 lei"
+                let pretRaw = null;
+                let pretVechiRaw = null;
+
+                const discountMatch = blockText.match(
+                    /([\\d\\s]{4,})\\s*lei[^\\d]*-\\s*\\d+\\s*%[^\\d]*-\\s*[\\d\\s]+\\s*lei[^\\d]*([\\d\\s]{4,})\\s*lei/
+                );
+
+                if (discountMatch) {
+                    pretVechiRaw = discountMatch[1];
+                    pretRaw = discountMatch[2];
+                } else {
+                    const lines = blockText.split('\\n').map(l => l.trim()).filter(Boolean);
                     for (const line of lines) {
                         if (!line.includes('lei')) continue;
                         if (line.includes('Cashback')) continue;
-                        // linia de reducere incepe mereu cu "-" (ex: "-3 000 lei")
-                        // - o excludem, altfel e confundata cu pretul real
                         if (line.startsWith('-')) continue;
                         const m = line.match(/([\\d\\s]{4,})\\s*lei/);
-                        if (m) found.push(m[1]);
-                    }
-                    if (found.length > 0) {
-                        prices = found;
-                        break;
+                        if (m) { pretRaw = m[1]; break; }
                     }
                 }
-                out.push({href, text: cardText, prices});
+
+                out.push({href, text: cardText, pretRaw, pretVechiRaw});
             }
             return out;
         }
@@ -421,15 +432,12 @@ def scrape_darwin(page, category_path="gaming/sisteme-pc", max_pages=30):
         for item in new_items:
             href = item["href"]
             text = item["text"]
-            prices = [clean_price(p) for p in item["prices"]]
-            prices = [p for p in prices if p]
+            pret = clean_price(item["pretRaw"]) if item["pretRaw"] else None
+            pret_vechi = clean_price(item["pretVechiRaw"]) if item["pretVechiRaw"] else None
 
             cashback_match = re.search(r"Cashback ([\d\s]+) lei", text)
             cashback = clean_price(cashback_match.group(1)) if cashback_match else None
             titlu = re.sub(r"Cashback.*$", "", text).strip()
-
-            pret = min(prices) if prices else None
-            pret_vechi = max(prices) if len(prices) > 1 and max(prices) != pret else None
 
             reducere_lei = None
             reducere_proc = None
