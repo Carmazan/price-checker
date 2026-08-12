@@ -383,41 +383,7 @@ def scrape_darwin(page, category_path="gaming/sisteme-pc", max_pages=30):
                 // (ex. casti, accesorii) - le excludem, pastram doar PC-urile
                 if (!/^Calculator/i.test(cardText)) continue;
                 seen.add(href);
-
-                let node = a;
-                let blockText = '';
-                for (let i = 0; i < 8; i++) {
-                    node = node.parentElement;
-                    if (!node) break;
-                    const t = node.innerText || '';
-                    if (t.includes('lei')) { blockText = t; break; }
-                }
-
-                // structura confirmata pe pagina reala:
-                // cu reducere:  "25 999 lei" -16% "-4 000 lei" "21 999 lei"
-                // fara reducere: doar "19 499 lei"
-                let pretRaw = null;
-                let pretVechiRaw = null;
-
-                const discountMatch = blockText.match(
-                    /([\\d\\s]{4,})\\s*lei[^\\d]*-\\s*\\d+\\s*%[^\\d]*-\\s*[\\d\\s]+\\s*lei[^\\d]*([\\d\\s]{4,})\\s*lei/
-                );
-
-                if (discountMatch) {
-                    pretVechiRaw = discountMatch[1];
-                    pretRaw = discountMatch[2];
-                } else {
-                    const lines = blockText.split('\\n').map(l => l.trim()).filter(Boolean);
-                    for (const line of lines) {
-                        if (!line.includes('lei')) continue;
-                        if (line.includes('Cashback')) continue;
-                        if (line.startsWith('-')) continue;
-                        const m = line.match(/([\\d\\s]{4,})\\s*lei/);
-                        if (m) { pretRaw = m[1]; break; }
-                    }
-                }
-
-                out.push({href, text: cardText, pretRaw, pretVechiRaw});
+                out.push({href, text: cardText});
             }
             return out;
         }
@@ -432,27 +398,19 @@ def scrape_darwin(page, category_path="gaming/sisteme-pc", max_pages=30):
         for item in new_items:
             href = item["href"]
             text = item["text"]
-            pret = clean_price(item["pretRaw"]) if item["pretRaw"] else None
-            pret_vechi = clean_price(item["pretVechiRaw"]) if item["pretVechiRaw"] else None
 
             cashback_match = re.search(r"Cashback ([\d\s]+) lei", text)
             cashback = clean_price(cashback_match.group(1)) if cashback_match else None
             titlu = re.sub(r"Cashback.*$", "", text).strip()
 
-            reducere_lei = None
-            reducere_proc = None
-            if pret and pret_vechi:
-                reducere_lei = pret_vechi - pret
-                reducere_proc = round((reducere_lei / pret_vechi) * 100, 1)
-
             results.append({
                 "site": "darwin.md",
                 "titlu": titlu,
                 "cpu_raw": titlu,
-                "pret": pret,
-                "pret_vechi": pret_vechi,
-                "reducere_lei": reducere_lei,
-                "reducere_proc": reducere_proc,
+                "pret": None,
+                "pret_vechi": None,
+                "reducere_lei": None,
+                "reducere_proc": None,
                 "cashback": cashback,
                 "stoc": "În stoc",
                 "link": href,
@@ -489,13 +447,11 @@ def scrape_darwin(page, category_path="gaming/sisteme-pc", max_pages=30):
 
 
 def verify_darwin_stock(page, candidates):
-    # pagina de categorie darwin.md nu arata stocul real - trebuie verificat
-    # pe fiecare pagina de produs. Structura difera intre produse:
-    # - in stoc: pret -> "Cumpara" -> (mult mai jos) sectiune "Disponibilitate"
-    # - epuizat: pret -> direct "Stoc epuizat" -> Cashback (fara sectiunea
-    #   de disponibilitate deloc)
-    # Cel mai sigur semnal: "Stoc epuizat" aparand IMEDIAT langa pret,
-    # inainte de "Cashback" - nu ne bazam pe sectiuni care uneori lipsesc.
+    # Extragem stocul SI pretul direct de pe pagina fiecarui produs (testat
+    # si confirmat pe exemple reale, nu ghicit):
+    # - in stoc, fara reducere: "...19 499 lei\nCumpara..." (o singura linie)
+    # - in stoc, cu reducere:   "...14 999 lei\n12 999 lei\nCumpara..." (2 linii)
+    # - epuizat: nu exista deloc butonul "Cumpara" pe pagina
     # Presupunem aceeasi ordine ca la enter.online: produsele active apar
     # primele in listare, deci ne oprim la primul produs fara stoc.
     verified = []
@@ -506,23 +462,48 @@ def verify_darwin_stock(page, candidates):
         link = item["link"]
         checked = idx + 1
         if checked % 10 == 0 or idx == 0:
-            print(f"  Darwin stoc: verific {checked}/{total}")
+            print(f"  Darwin: verific {checked}/{total}")
 
         try:
             page.goto(link, wait_until="domcontentloaded")
+            page.wait_for_timeout(400)
+            page.mouse.wheel(0, 800)
             try:
-                page.wait_for_selector("text=Cashback", timeout=6000)
+                page.wait_for_selector("text=Cumpără", timeout=8000)
             except Exception:
                 pass
-            page.wait_for_timeout(300)
+            page.wait_for_timeout(400)
 
             text = page.locator("body").inner_text()
-            cash_idx = text.find("Cashback")
-            window = text[max(0, cash_idx - 300):cash_idx] if cash_idx != -1 else text[:600]
+            buy_idx = text.find("Cumpără")
 
-            if "Stoc epuizat" in window:
+            if buy_idx == -1:
                 print(f"  Darwin: primul produs fara stoc la pozitia {checked}: {link}")
                 break
+
+            window = text[max(0, buy_idx - 250):buy_idx]
+            lines = [l.strip() for l in window.split("\n") if l.strip()]
+
+            price_lines = []
+            for line in lines:
+                m = re.match(r"^([\d\s]{4,})\s*lei$", line)
+                if m:
+                    price_lines.append(clean_price(m.group(1)))
+
+            if not price_lines:
+                print(f"  [diagnostic] 'Cumpără' gasit dar nicio linie de pret la produsul {checked}: {link}")
+                break
+
+            if len(price_lines) == 1:
+                item["pret"] = price_lines[0]
+                item["pret_vechi"] = None
+            else:
+                item["pret_vechi"] = price_lines[0]
+                item["pret"] = price_lines[-1]
+
+            if item["pret"] and item["pret_vechi"]:
+                item["reducere_lei"] = item["pret_vechi"] - item["pret"]
+                item["reducere_proc"] = round((item["reducere_lei"] / item["pret_vechi"]) * 100, 1)
 
             verified.append(item)
         except Exception as e:
