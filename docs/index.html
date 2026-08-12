@@ -468,10 +468,24 @@ function formatDate(iso) {
 }
 
 async function fetchData() {
-  const url = `${SUPABASE_URL}/rest/v1/products_fingerprint?select=fingerprint_key,cpu_model,gpu_model,ram_gb,ssd_gb,products_raw(site,titlu,cpu,gpu,ram,ssd,pret,pret_vechi,cashback,stoc,link,scraped_at)&order=raw_id.desc&limit=12000`;
-  const res = await fetch(url, { headers: HEADERS });
-  if (!res.ok) throw new Error(`Supabase a raspuns cu ${res.status}`);
-  return res.json();
+  // Supabase/PostgREST limiteaza fiecare cerere la ~1000 randuri, indiferent
+  // de limit-ul cerut - paginam cu offset pana adunam tot istoricul.
+  const pageSize = 1000;
+  const maxPages = 50; // siguranta: pana la 50 000 de randuri
+  let allRows = [];
+  let offset = 0;
+
+  for (let page = 0; page < maxPages; page++) {
+    const url = `${SUPABASE_URL}/rest/v1/products_fingerprint?select=fingerprint_key,cpu_model,gpu_model,ram_gb,ssd_gb,products_raw(site,titlu,cpu,gpu,ram,ssd,pret,pret_vechi,cashback,stoc,link,scraped_at)&order=raw_id.desc&limit=${pageSize}&offset=${offset}`;
+    const res = await fetch(url, { headers: HEADERS });
+    if (!res.ok) throw new Error(`Supabase a raspuns cu ${res.status}`);
+    const batch = await res.json();
+    allRows = allRows.concat(batch);
+    if (batch.length < pageSize) break;
+    offset += pageSize;
+  }
+
+  return allRows;
 }
 
 function dedupe(rows) {
