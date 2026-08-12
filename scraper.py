@@ -394,8 +394,13 @@ def scrape_darwin(page, category_path="gaming/sisteme-pc", max_pages=30):
                     let m;
                     const found = [];
                     while ((m = regex.exec(text)) !== null) {
-                        const before = text.slice(Math.max(0, m.index - 12), m.index);
-                        if (!before.includes('Cashback')) found.push(m[1]);
+                        const before = text.slice(Math.max(0, m.index - 15), m.index);
+                        if (before.includes('Cashback')) continue;
+                        // exclude linia de reducere (ex: "-3 600 lei"),
+                        // altfel min()/max() aleg gresit reducerea in loc
+                        // de pretul real
+                        if (/-\s*$/.test(before)) continue;
+                        found.push(m[1]);
                     }
                     if (found.length > 0) {
                         prices = found;
