@@ -171,6 +171,7 @@
 
   .site-enter { background: rgba(88,166,255,0.15); color: #58a6ff; }
   .site-xstore { background: rgba(255,166,87,0.15); color: #ffa657; }
+  .site-darwin { background: rgba(188,140,255,0.15); color: #bc8cff; }
 
   .price { font-family: var(--mono); font-weight: 600; }
   .price-old { font-family: var(--mono); color: var(--muted); text-decoration: line-through; font-size: 12px; }
@@ -452,6 +453,16 @@ const HEADERS = {
   Authorization: `Bearer ${SUPABASE_KEY}`,
 };
 
+const SITE_CLASSES = {
+  "enter.online": "site-enter",
+  "xstore.md": "site-xstore",
+  "darwin.md": "site-darwin",
+};
+
+function siteClass(site) {
+  return SITE_CLASSES[site] || "site-xstore";
+}
+
 let allItems = [];   // deduplicat, cel mai recent per (site, link)
 let groups = {};     // fingerprint_key -> [items]
 let dayIndex = new Map(); // ziua (YYYY-MM-DD) -> Map(site|link -> {raw, fp})
@@ -580,7 +591,6 @@ function renderChanges() {
     statusEl.textContent = `Comparație: ${yesterday} → ${today}`;
   }
 
-  const siteClass = s => s === "enter.online" ? "site-enter" : "site-xstore";
   const filterFn = raw => !siteFilter || raw.site === siteFilter;
 
   const competitorLine = (item) => {
@@ -673,12 +683,11 @@ function renderTopGpu() {
 
   tbody.innerHTML = rows.map(([gpu, item]) => {
     const raw = item.raw;
-    const siteClass = raw.site === "enter.online" ? "site-enter" : "site-xstore";
     return `
       <tr>
         <td style="font-family:var(--mono); font-weight:600;">${gpu}</td>
         <td class="price">${formatPrice(raw.pret)}</td>
-        <td><span class="site-badge ${siteClass}">${raw.site}</span></td>
+        <td><span class="site-badge ${siteClass(raw.site)}">${raw.site}</span></td>
         <td class="prod-title"><a class="prod-link" href="${raw.link}" target="_blank" rel="noopener">${raw.titlu}</a></td>
       </tr>`;
   }).join("");
@@ -758,10 +767,9 @@ function renderCompare() {
 
     const sitesHtml = arr.map(item => {
       const isCheapest = item.raw.pret === minPrice;
-      const siteClass = item.raw.site === "enter.online" ? "site-enter" : "site-xstore";
       return `
         <div class="compare-site-box ${isCheapest ? "cheapest" : ""}">
-          <span class="site-badge ${siteClass}">${item.raw.site}</span>
+          <span class="site-badge ${siteClass(item.raw.site)}">${item.raw.site}</span>
           <div style="margin-top:8px;">
             ${item.raw.pret_vechi ? `<div class="price-old">${formatPrice(item.raw.pret_vechi)}</div>` : ""}
             <div class="price" style="font-size:16px;">${formatPrice(item.raw.pret)}</div>
@@ -831,11 +839,10 @@ function renderAll() {
   const tbody = document.getElementById("allTableBody");
   tbody.innerHTML = items.map(item => {
     const raw = item.raw;
-    const siteClass = raw.site === "enter.online" ? "site-enter" : "site-xstore";
     const specLine = [raw.cpu, raw.gpu, raw.ram, raw.ssd].filter(Boolean).join(" · ");
     return `
       <tr>
-        <td><span class="site-badge ${siteClass}">${raw.site}</span></td>
+        <td><span class="site-badge ${siteClass(raw.site)}">${raw.site}</span></td>
         <td class="prod-title">
           <a class="prod-link" href="${raw.link}" target="_blank" rel="noopener">${raw.titlu}</a>
           ${specLine ? `<div class="prod-spec">${specLine}</div>` : ""}
