@@ -344,6 +344,12 @@
     <div class="filters">
       <input type="text" id="compareSearch" placeholder="Caută după CPU, GPU...">
       <select id="compareDate"></select>
+      <select id="compareSite">
+        <option value="">Toate site-urile</option>
+        <option value="enter.online">enter.online</option>
+        <option value="xstore.md">xstore.md</option>
+        <option value="darwin.md">darwin.md</option>
+      </select>
       <select id="compareSort">
         <option value="diff-desc">Diferență preț: mare → mică</option>
         <option value="diff-asc">Diferență preț: mică → mare</option>
@@ -714,12 +720,17 @@ function renderCompare() {
   const search = document.getElementById("compareSearch").value.toLowerCase();
   const sortMode = document.getElementById("compareSort").value;
   const dateFilter = document.getElementById("compareDate").value;
+  const siteFilter = document.getElementById("compareSite").value;
 
   const dayMap = dayIndex.get(dateFilter);
   const dayItems = dayMap ? Array.from(dayMap.values()) : allItems;
   const dayGroups = buildGroups(dayItems);
 
   let entries = Object.entries(dayGroups);
+
+  if (siteFilter) {
+    entries = entries.filter(([, arr]) => arr.some(i => i.raw.site === siteFilter));
+  }
 
   entries = entries.map(([key, arr]) => {
     const sorted = [...arr].sort((a, b) => a.raw.pret - b.raw.pret);
@@ -869,7 +880,7 @@ document.querySelectorAll("nav.tabs button").forEach(btn => {
   btn.addEventListener("click", () => switchTab(btn.dataset.tab));
 });
 
-["compareSearch", "compareSort", "compareDate"].forEach(id =>
+["compareSearch", "compareSort", "compareDate", "compareSite"].forEach(id =>
   document.getElementById(id).addEventListener("input", renderCompare));
 ["allSearch", "allSite", "allSort", "allDate", "allCompetition"].forEach(id =>
   document.getElementById(id).addEventListener("input", renderAll));
@@ -889,7 +900,7 @@ document.getElementById("evoModal").addEventListener("click", (e) => {
   if (e.target.id === "evoModal") closeEvolutionModal();
 });
 
-const SITE_COLORS = { "enter.online": "#58a6ff", "xstore.md": "#ffa657" };
+const SITE_COLORS = { "enter.online": "#58a6ff", "xstore.md": "#ffa657", "darwin.md": "#bc8cff" };
 
 function closeEvolutionModal() {
   document.getElementById("evoModal").classList.remove("open");
@@ -898,17 +909,29 @@ function closeEvolutionModal() {
 function openEvolutionModal(fingerprintKey, specLabel) {
   document.getElementById("evoTitle").textContent = specLabel;
 
-  // adunam pretul acestei configuratii, per site, pentru fiecare zi disponibila
+  // adunam pretul acestei configuratii, per site, pentru fiecare zi disponibila.
+  // pot exista mai multe produse cu aceeasi configuratie pe acelasi site in
+  // aceeasi zi (modele diferite, acelasi CPU/GPU/RAM/SSD) - pastram doar
+  // cel mai mic pret gasit, un singur punct per site per zi
   const bySite = new Map(); // site -> [{day, pret}]
   const days = [...sortedDays].reverse(); // cronologic, cel mai vechi primul
 
   for (const day of days) {
     const dayMap = dayIndex.get(day);
     if (!dayMap) continue;
+    const minForDay = new Map(); // site -> cel mai mic pret in ziua asta
+
     for (const item of dayMap.values()) {
       if (item.fp.fingerprint_key !== fingerprintKey) continue;
-      if (!bySite.has(item.raw.site)) bySite.set(item.raw.site, []);
-      bySite.get(item.raw.site).push({ day, pret: item.raw.pret });
+      const current = minForDay.get(item.raw.site);
+      if (current === undefined || item.raw.pret < current) {
+        minForDay.set(item.raw.site, item.raw.pret);
+      }
+    }
+
+    for (const [site, pret] of minForDay.entries()) {
+      if (!bySite.has(site)) bySite.set(site, []);
+      bySite.get(site).push({ day, pret });
     }
   }
 
