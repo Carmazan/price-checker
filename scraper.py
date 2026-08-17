@@ -517,6 +517,132 @@ def verify_darwin_stock(page, candidates):
 
 
 # ---------------------------------------------------------------------------
+# Scraper: ultra.md
+# ---------------------------------------------------------------------------
+
+def scrape_ultra(page, category_path="tehnica-computer/calculatoare/pentru-jocuri", max_pages=30):
+    # Statusul de stoc apare direct pe pagina de listare (eticheta "Vândut"),
+    # nu e nevoie sa vizitam fiecare produs individual ca la darwin.
+    # Presupunem aceeasi ordine ca la enter.online: produsele active apar
+    # primele, ne oprim la primul produs "Vândut".
+    results = []
+    base_url = f"https://ultra.md/{category_path}?page={{}}"
+
+    for page_number in range(1, max_pages + 1):
+        page.goto(base_url.format(page_number), wait_until="domcontentloaded")
+        page.wait_for_timeout(800)
+
+        items = page.evaluate("""
+        () => {
+            const anchors = Array.from(document.querySelectorAll("a[href*='/tehnica-computer/calculatoare/']"));
+            const out = [];
+            const seen = new Set();
+            for (const a of anchors) {
+                const href = a.href;
+                if (href.endsWith('/pentru-jocuri') || href.includes('?page=')) continue;
+                if (seen.has(href)) continue;
+
+                const titlu = (a.innerText || '').trim();
+                if (!titlu) continue;
+                seen.add(href);
+
+                let node = a;
+                let blockText = '';
+                for (let i = 0; i < 8; i++) {
+                    node = node.parentElement;
+                    if (!node) break;
+                    const t = node.innerText || '';
+                    if (t.includes('lei') || t.includes('showroom') || t.includes('coș') || t.includes('Notifică')) {
+                        blockText = t;
+                        break;
+                    }
+                }
+
+                out.push({href, titlu, blockText});
+            }
+            return out;
+        }
+        """)
+
+        if not items:
+            break
+
+        stop = False
+        page_results = 0
+
+        for item in items:
+            href = item["href"]
+            titlu_raw = item["titlu"]
+            block = item["blockText"]
+
+            if "Vândut" in block:
+                stop = True
+                break
+
+            lines = [l.strip() for l in block.split("\n") if l.strip()]
+            is_pure = lambda l: bool(re.match(r"^[\d\s\xa0]+$", l))
+            is_dash = lambda l: bool(re.match(r"^-[\d\s\xa0]+$", l))
+
+            i = 0
+            while i < len(lines) and not is_pure(lines[i]) and not is_dash(lines[i]):
+                i += 1
+
+            dash_count = 0
+            while i < len(lines) and is_dash(lines[i]):
+                dash_count += 1
+                i += 1
+
+            expected = 2 if dash_count >= 2 else 1
+            price_lines = []
+            while i < len(lines) and len(price_lines) < expected and is_pure(lines[i]):
+                price_lines.append(lines[i])
+                i += 1
+
+            # ultra.md nu are cashback - numarul de dupa pret e legat de
+            # rate/dobanda, nu il extragem
+
+            pret = None
+            pret_vechi = None
+            if len(price_lines) == 1:
+                pret = clean_price(price_lines[0])
+            elif len(price_lines) == 2:
+                pret_vechi = clean_price(price_lines[0])
+                pret = clean_price(price_lines[1])
+
+            if not pret:
+                continue
+
+            titlu_lines = [l.strip() for l in titlu_raw.split("\n") if l.strip()]
+            titlu = titlu_lines[0] if titlu_lines else ""
+            config = titlu_lines[1] if len(titlu_lines) > 1 else ""
+
+            reducere_lei = None
+            reducere_proc = None
+            if pret and pret_vechi:
+                reducere_lei = pret_vechi - pret
+                reducere_proc = round((reducere_lei / pret_vechi) * 100, 1)
+
+            results.append({
+                "site": "ultra.md",
+                "titlu": titlu,
+                "cpu_raw": config,
+                "pret": pret,
+                "pret_vechi": pret_vechi,
+                "reducere_lei": reducere_lei,
+                "reducere_proc": reducere_proc,
+                "cashback": None,
+                "stoc": "În stoc",
+                "link": href,
+            })
+            page_results += 1
+
+        if stop or page_results == 0:
+            break
+
+    return results
+
+
+# ---------------------------------------------------------------------------
 # Insert in Supabase
 # ---------------------------------------------------------------------------
 
@@ -615,6 +741,12 @@ def main():
         darwin_results = scrape_darwin(page)
         print(f"  {len(darwin_results)} produse")
         all_results.extend(darwin_results)
+        time.sleep(2)
+
+        print("Scraping ultra.md...")
+        ultra_results = scrape_ultra(page)
+        print(f"  {len(ultra_results)} produse")
+        all_results.extend(ultra_results)
 
         browser.close()
 
