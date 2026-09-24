@@ -683,6 +683,11 @@ def insert_products(rows):
             json=payload,
             timeout=30,
         )
+        if not resp.ok:
+            print(f"  [diagnostic] Supabase a raspuns {resp.status_code} la batch-ul {i}-{i+len(batch)}")
+            print(f"  [diagnostic] Mesaj: {resp.text}")
+            # afisam si un exemplu de rand din batch, ca sa vedem ce am trimis
+            print(f"  [diagnostic] Exemplu rand trimis: {payload[0]}")
         resp.raise_for_status()
         inserted.extend(resp.json())
 
