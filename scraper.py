@@ -213,6 +213,13 @@ def scrape_enter(page, max_pages=30):
                     if m:
                         cashback = clean_price(m.group(1))
 
+            # "Disponibil în X magazine" - numarul de magazine fizice unde
+            # produsul e disponibil chiar acum (stoc real, nu doar "In stoc")
+            magazine_stoc = None
+            mag_match = re.search(r"Disponibil în (\d+) magazin", text)
+            if mag_match:
+                magazine_stoc = int(mag_match.group(1))
+
             results.append({
                 "site": "enter.online",
                 "titlu": produs,
@@ -222,6 +229,7 @@ def scrape_enter(page, max_pages=30):
                 "reducere_lei": reducere_lei,
                 "reducere_proc": reducere_proc,
                 "cashback": cashback,
+                "magazine_stoc": magazine_stoc,
                 "stoc": "În stoc",
                 "link": link,
             })
