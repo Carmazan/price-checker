@@ -675,6 +675,11 @@ def insert_products(rows):
                 "gpu": gpu,
                 "ram": f"{ram_gb}GB" if ram_gb else None,
                 "ssd": f"{ssd_gb}GB" if ssd_gb else None,
+                # Supabase (PostgREST) cere ca toate obiectele dintr-un
+                # insert in masa sa aiba exact aceleasi chei - magazine_stoc
+                # exista doar la enter.online, deci il completam explicit
+                # cu None la restul site-urilor
+                "magazine_stoc": row.get("magazine_stoc"),
             })
 
         resp = requests.post(
