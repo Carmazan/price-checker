@@ -319,6 +319,29 @@
   .evo-legend span { display: inline-flex; align-items: center; gap: 5px; }
   .evo-legend .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
 
+  .evo-point { cursor: pointer; transition: r 0.1s; }
+  .evo-point:hover { r: 5; }
+
+  .evo-tooltip {
+    position: fixed;
+    display: none;
+    background: #1c2129;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px 10px;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--text);
+    pointer-events: none;
+    z-index: 200;
+    white-space: nowrap;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+  }
+
+  .evo-tooltip .t-site { font-weight: 700; margin-bottom: 3px; }
+  .evo-tooltip .t-row { color: var(--muted); }
+  .evo-tooltip .t-row b { color: var(--text); font-weight: 600; }
+
   @media (max-width: 640px) {
     .prod-title { max-width: 160px; }
     table { font-size: 12px; }
@@ -393,7 +416,8 @@
           <th>Produs</th>
           <th>Preț</th>
           <th>Cashback</th>
-          <th>Stoc</th>
+          <th>Magazine</th>
+          <th>Actualizat</th>
         </tr>
       </thead>
       <tbody id="allTableBody"></tbody>
@@ -456,6 +480,8 @@
   </div>
 </div>
 
+<div class="evo-tooltip" id="evoTooltip"></div>
+
 <script>
 const SUPABASE_URL = "https://bvnhkkcwbfzulqmhphjy.supabase.co";
 const SUPABASE_KEY = "sb_publishable_tzT-4L_4WLdkN_WGa74zIQ_75e719db";
@@ -500,7 +526,7 @@ async function fetchData() {
   let offset = 0;
 
   for (let page = 0; page < maxPages; page++) {
-    const url = `${SUPABASE_URL}/rest/v1/products_fingerprint?select=fingerprint_key,cpu_model,gpu_model,ram_gb,ssd_gb,products_raw(site,titlu,cpu,gpu,ram,ssd,pret,pret_vechi,cashback,stoc,link,scraped_at)&order=raw_id.desc&limit=${pageSize}&offset=${offset}`;
+    const url = `${SUPABASE_URL}/rest/v1/products_fingerprint?select=fingerprint_key,cpu_model,gpu_model,ram_gb,ssd_gb,products_raw(site,titlu,cpu,gpu,ram,ssd,pret,pret_vechi,cashback,magazine_stoc,stoc,link,scraped_at)&order=raw_id.desc&limit=${pageSize}&offset=${offset}`;
     const res = await fetch(url, { headers: HEADERS });
     if (!res.ok) throw new Error(`Supabase a raspuns cu ${res.status}`);
     const batch = await res.json();
@@ -796,6 +822,7 @@ function renderCompare() {
             <a class="prod-link" href="${item.raw.link}" target="_blank" rel="noopener">${item.raw.titlu}</a>
           </div>
           ${item.raw.cashback ? `<div style="margin-top:4px; font-size:11px; color:var(--good);">Cashback ${formatPrice(item.raw.cashback)}</div>` : ""}
+          ${item.raw.magazine_stoc != null ? `<div style="margin-top:2px; font-size:11px; color:var(--muted);">Disponibil în ${item.raw.magazine_stoc} magazine</div>` : ""}
         </div>`;
     }).join("");
 
@@ -870,6 +897,7 @@ function renderAll() {
           <div class="price">${formatPrice(raw.pret)}</div>
         </td>
         <td>${raw.cashback ? formatPrice(raw.cashback) : "—"}</td>
+        <td>${raw.magazine_stoc != null ? raw.magazine_stoc : "—"}</td>
         <td style="color:var(--muted); font-size:11px;">${formatDate(raw.scraped_at)}</td>
       </tr>`;
   }).join("");
@@ -911,6 +939,7 @@ const SITE_COLORS = { "enter.online": "#58a6ff", "xstore.md": "#ffa657", "darwin
 
 function closeEvolutionModal() {
   document.getElementById("evoModal").classList.remove("open");
+  document.getElementById("evoTooltip").style.display = "none";
 }
 
 function openEvolutionModal(fingerprintKey, specLabel) {
@@ -919,26 +948,27 @@ function openEvolutionModal(fingerprintKey, specLabel) {
   // adunam pretul acestei configuratii, per site, pentru fiecare zi disponibila.
   // pot exista mai multe produse cu aceeasi configuratie pe acelasi site in
   // aceeasi zi (modele diferite, acelasi CPU/GPU/RAM/SSD) - pastram doar
-  // cel mai mic pret gasit, un singur punct per site per zi
-  const bySite = new Map(); // site -> [{day, pret}]
+  // cel mai mic pret gasit, un singur punct per site per zi (si numarul de
+  // magazine al acelui produs specific, pentru tooltip)
+  const bySite = new Map(); // site -> [{day, pret, magazineStoc}]
   const days = [...sortedDays].reverse(); // cronologic, cel mai vechi primul
 
   for (const day of days) {
     const dayMap = dayIndex.get(day);
     if (!dayMap) continue;
-    const minForDay = new Map(); // site -> cel mai mic pret in ziua asta
+    const minForDay = new Map(); // site -> {pret, magazineStoc}
 
     for (const item of dayMap.values()) {
       if (item.fp.fingerprint_key !== fingerprintKey) continue;
       const current = minForDay.get(item.raw.site);
-      if (current === undefined || item.raw.pret < current) {
-        minForDay.set(item.raw.site, item.raw.pret);
+      if (!current || item.raw.pret < current.pret) {
+        minForDay.set(item.raw.site, { pret: item.raw.pret, magazineStoc: item.raw.magazine_stoc });
       }
     }
 
-    for (const [site, pret] of minForDay.entries()) {
+    for (const [site, { pret, magazineStoc }] of minForDay.entries()) {
       if (!bySite.has(site)) bySite.set(site, []);
-      bySite.get(site).push({ day, pret });
+      bySite.get(site).push({ day, pret, magazineStoc });
     }
   }
 
@@ -946,6 +976,7 @@ function openEvolutionModal(fingerprintKey, specLabel) {
     days.length > 0 ? `${days[0]} → ${days[days.length - 1]}` : "";
 
   document.getElementById("evoChartWrap").innerHTML = renderEvoChart(bySite, days);
+  attachEvoTooltip();
 
   const legend = document.getElementById("evoLegend");
   legend.innerHTML = Array.from(bySite.keys()).map(site => `
@@ -992,12 +1023,41 @@ function renderEvoChart(bySite, days) {
     svg += `<polyline points="${points}" fill="none" stroke="${color}" stroke-width="2"/>`;
     series.forEach(p => {
       const dayIdx = days.indexOf(p.day);
-      svg += `<circle cx="${xFor(dayIdx)}" cy="${yFor(p.pret)}" r="3" fill="${color}"/>`;
+      const magAttr = p.magazineStoc != null ? ` data-mag="${p.magazineStoc}"` : "";
+      svg += `<circle class="evo-point" cx="${xFor(dayIdx)}" cy="${yFor(p.pret)}" r="3.5" fill="${color}" ` +
+             `data-site="${site}" data-day="${p.day}" data-pret="${p.pret}"${magAttr}/>`;
     });
   }
 
   svg += `</svg>`;
   return svg;
+}
+
+function attachEvoTooltip() {
+  const wrap = document.getElementById("evoChartWrap");
+  const tooltip = document.getElementById("evoTooltip");
+
+  wrap.querySelectorAll(".evo-point").forEach(point => {
+    point.addEventListener("mouseenter", (e) => {
+      const { site, day, pret, mag } = e.target.dataset;
+      tooltip.innerHTML = `
+        <div class="t-site" style="color:${SITE_COLORS[site] || "#8b949e"}">${site}</div>
+        <div class="t-row">${day}</div>
+        <div class="t-row">Preț: <b>${formatPrice(Number(pret))}</b></div>
+        ${mag !== undefined ? `<div class="t-row">Magazine: <b>${mag}</b></div>` : ""}
+      `;
+      tooltip.style.display = "block";
+    });
+
+    point.addEventListener("mousemove", (e) => {
+      tooltip.style.left = (e.clientX + 14) + "px";
+      tooltip.style.top = (e.clientY + 14) + "px";
+    });
+
+    point.addEventListener("mouseleave", () => {
+      tooltip.style.display = "none";
+    });
+  });
 }
 
 async function init() {
