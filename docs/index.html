@@ -315,9 +315,32 @@
     cursor: pointer;
   }
 
-  .evo-legend { display: flex; gap: 16px; margin-top: 10px; font-size: 11px; color: var(--muted); }
-  .evo-legend span { display: inline-flex; align-items: center; gap: 5px; }
-  .evo-legend .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+  .evo-legend { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; font-size: 12px; }
+  .evo-legend-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border-radius: 20px;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    cursor: pointer;
+    color: var(--text);
+    user-select: none;
+    transition: opacity 0.15s, border-color 0.15s;
+  }
+  .evo-legend-item:hover { border-color: var(--accent); }
+  .evo-legend-item.inactive { opacity: 0.35; }
+  .evo-legend-item .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+
+  .evo-chart-title {
+    font-family: var(--mono);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--muted);
+    margin: 14px 0 6px;
+  }
 
   .evo-point { cursor: pointer; transition: r 0.1s; }
   .evo-point:hover { r: 5; }
@@ -475,8 +498,11 @@
     <button class="modal-close" id="evoClose">✕</button>
     <h3 id="evoTitle"></h3>
     <div class="modal-sub" id="evoSub"></div>
-    <div id="evoChartWrap"></div>
     <div class="evo-legend" id="evoLegend"></div>
+    <div class="evo-chart-title">Preț</div>
+    <div id="evoChartWrap"></div>
+    <div class="evo-chart-title" id="evoStockTitle" style="display:none;">Disponibilitate (magazine)</div>
+    <div id="evoStockChartWrap"></div>
   </div>
 </div>
 
@@ -937,6 +963,10 @@ document.getElementById("evoModal").addEventListener("click", (e) => {
 
 const SITE_COLORS = { "enter.online": "#58a6ff", "xstore.md": "#ffa657", "darwin.md": "#bc8cff", "ultra.md": "#39d0d8" };
 
+let evoBySite = new Map();   // site -> [{day, pret, magazineStoc}]
+let evoDays = [];
+let evoActiveSites = new Set();
+
 function closeEvolutionModal() {
   document.getElementById("evoModal").classList.remove("open");
   document.getElementById("evoTooltip").style.display = "none";
@@ -949,14 +979,14 @@ function openEvolutionModal(fingerprintKey, specLabel) {
   // pot exista mai multe produse cu aceeasi configuratie pe acelasi site in
   // aceeasi zi (modele diferite, acelasi CPU/GPU/RAM/SSD) - pastram doar
   // cel mai mic pret gasit, un singur punct per site per zi (si numarul de
-  // magazine al acelui produs specific, pentru tooltip)
-  const bySite = new Map(); // site -> [{day, pret, magazineStoc}]
+  // magazine al acelui produs specific, pentru tooltip si al doilea grafic)
+  const bySite = new Map();
   const days = [...sortedDays].reverse(); // cronologic, cel mai vechi primul
 
   for (const day of days) {
     const dayMap = dayIndex.get(day);
     if (!dayMap) continue;
-    const minForDay = new Map(); // site -> {pret, magazineStoc}
+    const minForDay = new Map();
 
     for (const item of dayMap.values()) {
       if (item.fp.fingerprint_key !== fingerprintKey) continue;
@@ -972,43 +1002,93 @@ function openEvolutionModal(fingerprintKey, specLabel) {
     }
   }
 
+  evoBySite = bySite;
+  evoDays = days;
+  evoActiveSites = new Set(bySite.keys()); // toate site-urile active la deschidere
+
   document.getElementById("evoSub").textContent =
     days.length > 0 ? `${days[0]} → ${days[days.length - 1]}` : "";
 
-  document.getElementById("evoChartWrap").innerHTML = renderEvoChart(bySite, days);
-  attachEvoTooltip();
-
-  const legend = document.getElementById("evoLegend");
-  legend.innerHTML = Array.from(bySite.keys()).map(site => `
-    <span><span class="dot" style="background:${SITE_COLORS[site] || "#8b949e"};"></span>${site}</span>
-  `).join("");
-
+  renderEvoModal();
   document.getElementById("evoModal").classList.add("open");
 }
 
-function renderEvoChart(bySite, days) {
-  const W = 640, H = 260, padL = 60, padR = 20, padT = 20, padB = 30;
+function toggleEvoSite(site) {
+  if (evoActiveSites.has(site)) {
+    if (evoActiveSites.size === 1) return; // nu lasam sa ramana zero site-uri active
+    evoActiveSites.delete(site);
+  } else {
+    evoActiveSites.add(site);
+  }
+  renderEvoModal();
+}
 
-  let allPrices = [];
-  for (const series of bySite.values()) allPrices.push(...series.map(p => p.pret));
-  if (allPrices.length === 0) return `<div class="empty-state" style="padding:30px;">Nu avem suficiente date pentru grafic.</div>`;
+function renderEvoModal() {
+  const legend = document.getElementById("evoLegend");
+  legend.innerHTML = Array.from(evoBySite.keys()).map(site => {
+    const active = evoActiveSites.has(site);
+    return `
+      <span class="evo-legend-item ${active ? "" : "inactive"}" data-site="${site}">
+        <span class="dot" style="background:${SITE_COLORS[site] || "#8b949e"};"></span>${site}
+      </span>`;
+  }).join("");
 
-  const minP = Math.min(...allPrices) * 0.97;
-  const maxP = Math.max(...allPrices) * 1.03;
+  legend.querySelectorAll(".evo-legend-item").forEach(el => {
+    el.addEventListener("click", () => toggleEvoSite(el.dataset.site));
+  });
+
+  const activeBySite = new Map(
+    Array.from(evoBySite.entries()).filter(([site]) => evoActiveSites.has(site))
+  );
+
+  document.getElementById("evoChartWrap").innerHTML =
+    renderEvoChart(activeBySite, evoDays, p => p.pret, v => formatPrice(v));
+  attachEvoTooltip("evoChartWrap", "Preț", v => formatPrice(Number(v)));
+
+  // al doilea grafic: stocul pe magazine, doar daca exista date pentru
+  // cel putin un site (deocamdata doar enter.online le are)
+  const hasStockData = Array.from(evoBySite.values())
+    .some(series => series.some(p => p.magazineStoc != null));
+
+  const stockTitle = document.getElementById("evoStockTitle");
+  const stockWrap = document.getElementById("evoStockChartWrap");
+
+  if (hasStockData) {
+    stockTitle.style.display = "block";
+    const stockBySite = new Map();
+    for (const [site, series] of activeBySite.entries()) {
+      const withStock = series.filter(p => p.magazineStoc != null);
+      if (withStock.length > 0) stockBySite.set(site, withStock);
+    }
+    stockWrap.innerHTML = renderEvoChart(stockBySite, evoDays, p => p.magazineStoc, v => `${v}`);
+    attachEvoTooltip("evoStockChartWrap", "Magazine", v => v);
+  } else {
+    stockTitle.style.display = "none";
+    stockWrap.innerHTML = "";
+  }
+}
+
+function renderEvoChart(bySite, days, valueOf, formatValue) {
+  const W = 640, H = 220, padL = 60, padR = 20, padT = 20, padB = 30;
+
+  let allValues = [];
+  for (const series of bySite.values()) allValues.push(...series.map(valueOf));
+  if (allValues.length === 0) return `<div class="empty-state" style="padding:30px;">Nu avem date pentru site-urile selectate.</div>`;
+
+  const minV = Math.min(...allValues) * (Math.min(...allValues) > 0 ? 0.9 : 1);
+  const maxV = Math.max(...allValues) * 1.1 || 1;
   const xFor = (dayIdx) => padL + (dayIdx / Math.max(1, days.length - 1)) * (W - padL - padR);
-  const yFor = (price) => padT + (1 - (price - minP) / (maxP - minP)) * (H - padT - padB);
+  const yFor = (v) => padT + (1 - (v - minV) / (maxV - minV || 1)) * (H - padT - padB);
 
   let svg = `<svg viewBox="0 0 ${W} ${H}" style="width:100%; height:auto;">`;
 
-  // linii de grid orizontale + etichete pret
   for (let i = 0; i <= 3; i++) {
-    const p = minP + (i / 3) * (maxP - minP);
-    const y = yFor(p);
+    const v = minV + (i / 3) * (maxV - minV);
+    const y = yFor(v);
     svg += `<line x1="${padL}" y1="${y}" x2="${W - padR}" y2="${y}" stroke="#30363d" stroke-width="1"/>`;
-    svg += `<text x="${padL - 8}" y="${y + 4}" text-anchor="end" font-size="10" fill="#8b949e" font-family="JetBrains Mono, monospace">${Math.round(p).toLocaleString("ro-RO")}</text>`;
+    svg += `<text x="${padL - 8}" y="${y + 4}" text-anchor="end" font-size="10" fill="#8b949e" font-family="JetBrains Mono, monospace">${formatValue(Math.round(v)).replace(" lei", "")}</text>`;
   }
 
-  // etichete zile (prima, mijloc, ultima)
   const dayTickIdxs = days.length > 1 ? [0, Math.floor((days.length - 1) / 2), days.length - 1] : [0];
   dayTickIdxs.forEach(idx => {
     svg += `<text x="${xFor(idx)}" y="${H - 8}" text-anchor="middle" font-size="10" fill="#8b949e" font-family="JetBrains Mono, monospace">${days[idx]?.slice(5) || ""}</text>`;
@@ -1018,13 +1098,13 @@ function renderEvoChart(bySite, days) {
     const color = SITE_COLORS[site] || "#8b949e";
     const points = series.map(p => {
       const dayIdx = days.indexOf(p.day);
-      return `${xFor(dayIdx)},${yFor(p.pret)}`;
+      return `${xFor(dayIdx)},${yFor(valueOf(p))}`;
     }).join(" ");
     svg += `<polyline points="${points}" fill="none" stroke="${color}" stroke-width="2"/>`;
     series.forEach(p => {
       const dayIdx = days.indexOf(p.day);
       const magAttr = p.magazineStoc != null ? ` data-mag="${p.magazineStoc}"` : "";
-      svg += `<circle class="evo-point" cx="${xFor(dayIdx)}" cy="${yFor(p.pret)}" r="3.5" fill="${color}" ` +
+      svg += `<circle class="evo-point" cx="${xFor(dayIdx)}" cy="${yFor(valueOf(p))}" r="3.5" fill="${color}" ` +
              `data-site="${site}" data-day="${p.day}" data-pret="${p.pret}"${magAttr}/>`;
     });
   }
@@ -1033,8 +1113,8 @@ function renderEvoChart(bySite, days) {
   return svg;
 }
 
-function attachEvoTooltip() {
-  const wrap = document.getElementById("evoChartWrap");
+function attachEvoTooltip(wrapId) {
+  const wrap = document.getElementById(wrapId);
   const tooltip = document.getElementById("evoTooltip");
 
   wrap.querySelectorAll(".evo-point").forEach(point => {
