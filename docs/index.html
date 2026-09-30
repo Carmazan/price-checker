@@ -441,6 +441,7 @@
           <th>Cashback</th>
           <th>Magazine</th>
           <th>Actualizat</th>
+          <th></th>
         </tr>
       </thead>
       <tbody id="allTableBody"></tbody>
@@ -911,6 +912,8 @@ function renderAll() {
   tbody.innerHTML = items.map(item => {
     const raw = item.raw;
     const specLine = [raw.cpu, raw.gpu, raw.ram, raw.ssd].filter(Boolean).join(" · ");
+    const fpKey = item.fp?.fingerprint_key;
+    const hasFingerprint = fpKey && !fpKey.includes("unknown");
     return `
       <tr>
         <td><span class="site-badge ${siteClass(raw.site)}">${raw.site}</span></td>
@@ -925,6 +928,7 @@ function renderAll() {
         <td>${raw.cashback ? formatPrice(raw.cashback) : "—"}</td>
         <td>${raw.magazine_stoc != null ? raw.magazine_stoc : "—"}</td>
         <td style="color:var(--muted); font-size:11px;">${formatDate(raw.scraped_at)}</td>
+        <td>${hasFingerprint ? `<button class="evo-btn" data-fp="${fpKey}" data-spec="${(specLine || raw.titlu).replace(/"/g, "&quot;")}">Evoluție</button>` : ""}</td>
       </tr>`;
   }).join("");
 }
@@ -949,11 +953,13 @@ document.querySelectorAll("nav.tabs button").forEach(btn => {
   document.getElementById(id).addEventListener("input", renderChanges));
 document.getElementById("topgpuDate").addEventListener("input", renderTopGpu);
 
-// evolutie pret: delegare eveniment, cardurile se genereaza dinamic
-document.getElementById("compareList").addEventListener("click", (e) => {
-  const btn = e.target.closest(".evo-btn");
-  if (!btn) return;
-  openEvolutionModal(btn.dataset.fp, btn.dataset.spec);
+// evolutie pret: delegare eveniment, cardurile/randurile se genereaza dinamic
+["compareList", "allTableBody"].forEach(id => {
+  document.getElementById(id).addEventListener("click", (e) => {
+    const btn = e.target.closest(".evo-btn");
+    if (!btn) return;
+    openEvolutionModal(btn.dataset.fp, btn.dataset.spec);
+  });
 });
 
 document.getElementById("evoClose").addEventListener("click", closeEvolutionModal);
