@@ -103,6 +103,25 @@ def clean_price(text):
     return int("".join(numbers)) if numbers else None
 
 
+def extract_darwin_physical_stock(text):
+    # numaram TOATE locurile cu "In stoc" din panoul de disponibilitate,
+    # inclusiv Magazin Online (daca doar online are stoc, trebuie sa arate 1)
+    start_idx = text.find("Solicită Pick-Up")
+    if start_idx == -1:
+        return None
+
+    end_idx = text.find("Pick-up", start_idx + 20)
+    if end_idx == -1:
+        end_idx = start_idx + 8000
+
+    window = text[start_idx:end_idx]
+    statuses = re.findall(r"(În stoc|Stoc epuizat)", window)
+    if not statuses:
+        return None
+
+    return statuses.count("În stoc")
+
+
 def build_fingerprint(cpu, gpu, ram_gb, ssd_gb):
     parts = [
         cpu or "unknown",
@@ -512,6 +531,20 @@ def verify_darwin_stock(page, candidates):
             if item["pret"] and item["pret_vechi"]:
                 item["reducere_lei"] = item["pret_vechi"] - item["pret"]
                 item["reducere_proc"] = round((item["reducere_lei"] / item["pret_vechi"]) * 100, 1)
+
+            # Numarul de magazine fizice cu stoc - informatia nu e vizibila
+            # in pagina decat dupa ce dai click pe butonul "Disponibilitate"
+            # (testat separat, confirmat ca e nevoie de click real)
+            item["magazine_stoc"] = None
+            try:
+                disp_btn = page.locator("text=Disponibilitate").first
+                if disp_btn.count() > 0:
+                    disp_btn.click(timeout=3000)
+                    page.wait_for_timeout(600)
+                    panel_text = page.locator("body").inner_text()
+                    item["magazine_stoc"] = extract_darwin_physical_stock(panel_text)
+            except Exception:
+                pass
 
             verified.append(item)
         except Exception as e:
