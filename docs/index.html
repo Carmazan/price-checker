@@ -424,6 +424,8 @@
         <option value="pret-asc">Preț: crescător</option>
         <option value="pret-desc">Preț: descrescător</option>
         <option value="date-desc">Cel mai recent</option>
+        <option value="mag-asc">Stoc magazine: crescător</option>
+        <option value="mag-desc">Stoc magazine: descrescător</option>
       </select>
       <select id="allCompetition">
         <option value="">Toate configurațiile</option>
@@ -532,7 +534,12 @@ function siteClass(site) {
 let allItems = [];   // deduplicat, cel mai recent per (site, link)
 let groups = {};     // fingerprint_key -> [items]
 let dayIndex = new Map(); // ziua (YYYY-MM-DD) -> Map(site|link -> {raw, fp})
-let sortedDays = [];  // zile disponibile, descrescator
+let sortedDays = [];  // zilele INCARCATE in dayIndex, descrescator
+let allDays = [];     // TOATE zilele disponibile in baza de date (pentru dropdown-uri), descrescator
+const loadedDays = new Set(); // zilele deja incarcate complet in dayIndex
+
+const RECENT_DAYS_WINDOW = 30; // la pornire incarcam doar ultimele N zile, restul se incarca la cerere
+const PRODUCTS_SELECT = "site,titlu,cpu,gpu,ram,ssd,pret,pret_vechi,cashback,magazine_stoc,stoc,link,scraped_at";
 
 function formatPrice(n) {
   if (n === null || n === undefined) return "—";
@@ -544,16 +551,21 @@ function formatDate(iso) {
   return d.toLocaleDateString("ro-RO", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
 }
 
-async function fetchData() {
+async function fetchData(cutoffISO) {
   // Supabase/PostgREST limiteaza fiecare cerere la ~1000 randuri, indiferent
-  // de limit-ul cerut - paginam cu offset pana adunam tot istoricul.
+  // de limit-ul cerut - paginam cu offset pana adunam tot istoricul (sau doar
+  // fereastra recenta, daca cutoffISO e dat - asa pornim rapid pagina).
   const pageSize = 1000;
   const maxPages = 50; // siguranta: pana la 50 000 de randuri
   let allRows = [];
   let offset = 0;
 
+  const cutoffParam = cutoffISO
+    ? `&products_raw.scraped_at=gte.${encodeURIComponent(cutoffISO)}`
+    : "";
+
   for (let page = 0; page < maxPages; page++) {
-    const url = `${SUPABASE_URL}/rest/v1/products_fingerprint?select=fingerprint_key,cpu_model,gpu_model,ram_gb,ssd_gb,products_raw(site,titlu,cpu,gpu,ram,ssd,pret,pret_vechi,cashback,magazine_stoc,stoc,link,scraped_at)&order=raw_id.desc&limit=${pageSize}&offset=${offset}`;
+    const url = `${SUPABASE_URL}/rest/v1/products_fingerprint?select=fingerprint_key,cpu_model,gpu_model,ram_gb,ssd_gb,products_raw(${PRODUCTS_SELECT})&order=raw_id.desc&limit=${pageSize}&offset=${offset}${cutoffParam}`;
     const res = await fetch(url, { headers: HEADERS });
     if (!res.ok) throw new Error(`Supabase a raspuns cu ${res.status}`);
     const batch = await res.json();
@@ -563,6 +575,73 @@ async function fetchData() {
   }
 
   return allRows;
+}
+
+async function fetchAllDaysList() {
+  const url = `${SUPABASE_URL}/rest/v1/distinct_scrape_days?select=day&order=day.desc`;
+  const res = await fetch(url, { headers: HEADERS });
+  if (!res.ok) throw new Error(`Supabase a raspuns cu ${res.status}`);
+  const rows = await res.json();
+  return rows.map(r => r.day);
+}
+
+async function fetchDayDetail(day) {
+  // fetch complet pentru O zi anume (pentru incarcare lazy la selectare in dropdown)
+  const dayStart = `${day}T00:00:00`;
+  const nextDay = new Date(`${day}T00:00:00Z`);
+  nextDay.setUTCDate(nextDay.getUTCDate() + 1);
+  const dayEnd = nextDay.toISOString().slice(0, 19);
+
+  const pageSize = 1000;
+  const maxPages = 20;
+  let allRows = [];
+  let offset = 0;
+
+  for (let page = 0; page < maxPages; page++) {
+    const url = `${SUPABASE_URL}/rest/v1/products_fingerprint?select=fingerprint_key,cpu_model,gpu_model,ram_gb,ssd_gb,products_raw(${PRODUCTS_SELECT})` +
+      `&order=raw_id.desc&limit=${pageSize}&offset=${offset}` +
+      `&products_raw.scraped_at=gte.${dayStart}&products_raw.scraped_at=lt.${dayEnd}`;
+    const res = await fetch(url, { headers: HEADERS });
+    if (!res.ok) throw new Error(`Supabase a raspuns cu ${res.status}`);
+    const batch = await res.json();
+    allRows = allRows.concat(batch);
+    if (batch.length < pageSize) break;
+    offset += pageSize;
+  }
+
+  return allRows;
+}
+
+function mergeRowsIntoDayIndex(rawRows) {
+  for (const row of rawRows) {
+    const raw = row.products_raw;
+    if (!raw || !raw.pret) continue;
+    const day = dayStr(raw.scraped_at);
+    const key = raw.site + "|" + raw.link;
+    if (!dayIndex.has(day)) dayIndex.set(day, new Map());
+    const dayMap = dayIndex.get(day);
+    const existing = dayMap.get(key);
+    if (!existing || new Date(raw.scraped_at) > new Date(existing.raw.scraped_at)) {
+      dayMap.set(key, { raw, fp: row });
+    }
+  }
+}
+
+async function ensureDayLoaded(day) {
+  if (!day || loadedDays.has(day)) return;
+  const rows = await fetchDayDetail(day);
+  mergeRowsIntoDayIndex(rows);
+  loadedDays.add(day);
+}
+
+async function fetchFullHistoryForFingerprint(fingerprintKey) {
+  // istoric complet, nelimitat de fereastra de 30 de zile - folosit doar de
+  // modalul de Evolutie, care trebuie sa arate TOT istoricul unei configuratii.
+  const url = `${SUPABASE_URL}/rest/v1/products_fingerprint?select=fingerprint_key,products_raw(site,pret,magazine_stoc,scraped_at)` +
+    `&fingerprint_key=eq.${encodeURIComponent(fingerprintKey)}&order=raw_id.asc&limit=5000`;
+  const res = await fetch(url, { headers: HEADERS });
+  if (!res.ok) throw new Error(`Supabase a raspuns cu ${res.status}`);
+  return res.json();
 }
 
 function dedupe(rows) {
@@ -903,6 +982,8 @@ function renderAll() {
   items.sort((a, b) => {
     if (sortMode === "pret-asc") return (a.raw.pret || 0) - (b.raw.pret || 0);
     if (sortMode === "pret-desc") return (b.raw.pret || 0) - (a.raw.pret || 0);
+    if (sortMode === "mag-asc") return (a.raw.magazine_stoc ?? -1) - (b.raw.magazine_stoc ?? -1);
+    if (sortMode === "mag-desc") return (b.raw.magazine_stoc ?? -1) - (a.raw.magazine_stoc ?? -1);
     return new Date(b.raw.scraped_at) - new Date(a.raw.scraped_at);
   });
 
@@ -945,13 +1026,64 @@ document.querySelectorAll("nav.tabs button").forEach(btn => {
   btn.addEventListener("click", () => switchTab(btn.dataset.tab));
 });
 
-["compareSearch", "compareSort", "compareDate", "compareSite"].forEach(id =>
+["compareSearch", "compareSort", "compareSite"].forEach(id =>
   document.getElementById(id).addEventListener("input", renderCompare));
-["allSearch", "allSite", "allSort", "allDate", "allCompetition"].forEach(id =>
+["allSearch", "allSite", "allSort", "allCompetition"].forEach(id =>
   document.getElementById(id).addEventListener("input", renderAll));
-["changesSite", "changesDate"].forEach(id =>
-  document.getElementById(id).addEventListener("input", renderChanges));
-document.getElementById("topgpuDate").addEventListener("input", renderTopGpu);
+document.getElementById("changesSite").addEventListener("input", renderChanges);
+
+// Select-urile de data pot cere o zi care nu e inca incarcata in memorie
+// (vedem doar ultimele RECENT_DAYS_WINDOW zile la pornire) - le incarcam
+// la cerere ("change", nu "input", ca sa nu declansam fetch la fiecare tasta).
+const DATE_SELECT_STATUS = {
+  compareDate: "compareStatus",
+  allDate: "allStatus",
+  changesDate: "changesStatus",
+  topgpuDate: "topgpuStatus",
+};
+
+async function onDateSelectChange(selectId, renderFn, needsPrevDay) {
+  const day = document.getElementById(selectId).value;
+  const statusId = DATE_SELECT_STATUS[selectId];
+  const statusEl = statusId ? document.getElementById(statusId) : null;
+  const prevText = statusEl ? statusEl.textContent : "";
+
+  const alreadyLoaded = loadedDays.has(day) &&
+    (!needsPrevDay || (() => {
+      const idx = allDays.indexOf(day);
+      const prevDay = idx !== -1 && idx + 1 < allDays.length ? allDays[idx + 1] : null;
+      return !prevDay || loadedDays.has(prevDay);
+    })());
+
+  if (!alreadyLoaded) {
+    if (statusEl) statusEl.textContent = "Se încarcă...";
+    try {
+      await ensureDayLoaded(day);
+      if (needsPrevDay) {
+        const idx = allDays.indexOf(day);
+        const prevDay = idx !== -1 && idx + 1 < allDays.length ? allDays[idx + 1] : null;
+        if (prevDay) await ensureDayLoaded(prevDay);
+      }
+    } catch (err) {
+      if (statusEl) statusEl.textContent = `Eroare la încărcare: ${err.message}`;
+      console.error(err);
+      return;
+    }
+  }
+
+  sortedDays = Array.from(dayIndex.keys()).sort().reverse();
+  renderFn();
+  if (statusEl && statusEl.textContent === "Se încarcă...") statusEl.textContent = prevText;
+}
+
+document.getElementById("compareDate").addEventListener("change", () =>
+  onDateSelectChange("compareDate", renderCompare, false));
+document.getElementById("allDate").addEventListener("change", () =>
+  onDateSelectChange("allDate", renderAll, false));
+document.getElementById("changesDate").addEventListener("change", () =>
+  onDateSelectChange("changesDate", renderChanges, true));
+document.getElementById("topgpuDate").addEventListener("change", () =>
+  onDateSelectChange("topgpuDate", renderTopGpu, false));
 
 // evolutie pret: delegare eveniment, cardurile/randurile se genereaza dinamic
 ["compareList", "allTableBody"].forEach(id => {
@@ -978,31 +1110,48 @@ function closeEvolutionModal() {
   document.getElementById("evoTooltip").style.display = "none";
 }
 
-function openEvolutionModal(fingerprintKey, specLabel) {
+async function openEvolutionModal(fingerprintKey, specLabel) {
   document.getElementById("evoTitle").textContent = specLabel;
+  document.getElementById("evoSub").textContent = "Se încarcă istoricul complet...";
+  document.getElementById("evoChartWrap").innerHTML = "";
+  document.getElementById("evoStockChartWrap").innerHTML = "";
+  document.getElementById("evoLegend").innerHTML = "";
+  document.getElementById("evoModal").classList.add("open");
+
+  // Evolutia arata TOT istoricul unei configuratii, indiferent de fereastra
+  // de 30 de zile incarcata eager pe restul paginii - cerem direct de la
+  // Supabase, nelimitat, independent de dayIndex.
+  let rows;
+  try {
+    rows = await fetchFullHistoryForFingerprint(fingerprintKey);
+  } catch (err) {
+    document.getElementById("evoSub").textContent = `Eroare la încărcarea istoricului: ${err.message}`;
+    console.error(err);
+    return;
+  }
 
   // adunam pretul acestei configuratii, per site, pentru fiecare zi disponibila.
   // pot exista mai multe produse cu aceeasi configuratie pe acelasi site in
   // aceeasi zi (modele diferite, acelasi CPU/GPU/RAM/SSD) - pastram doar
   // cel mai mic pret gasit, un singur punct per site per zi (si numarul de
   // magazine al acelui produs specific, pentru tooltip si al doilea grafic)
-  const bySite = new Map();
-  const days = [...sortedDays].reverse(); // cronologic, cel mai vechi primul
-
-  for (const day of days) {
-    const dayMap = dayIndex.get(day);
-    if (!dayMap) continue;
-    const minForDay = new Map();
-
-    for (const item of dayMap.values()) {
-      if (item.fp.fingerprint_key !== fingerprintKey) continue;
-      const current = minForDay.get(item.raw.site);
-      if (!current || item.raw.pret < current.pret) {
-        minForDay.set(item.raw.site, { pret: item.raw.pret, magazineStoc: item.raw.magazine_stoc });
-      }
+  const byDay = new Map(); // day -> site -> {pret, magazineStoc}
+  for (const row of rows) {
+    const raw = row.products_raw;
+    if (!raw || raw.pret == null) continue;
+    const day = dayStr(raw.scraped_at);
+    if (!byDay.has(day)) byDay.set(day, new Map());
+    const dayMap = byDay.get(day);
+    const current = dayMap.get(raw.site);
+    if (!current || raw.pret < current.pret) {
+      dayMap.set(raw.site, { pret: raw.pret, magazineStoc: raw.magazine_stoc });
     }
+  }
 
-    for (const [site, { pret, magazineStoc }] of minForDay.entries()) {
+  const days = Array.from(byDay.keys()).sort(); // cronologic, cel mai vechi primul
+  const bySite = new Map();
+  for (const day of days) {
+    for (const [site, { pret, magazineStoc }] of byDay.get(day).entries()) {
       if (!bySite.has(site)) bySite.set(site, []);
       bySite.get(site).push({ day, pret, magazineStoc });
     }
@@ -1013,10 +1162,9 @@ function openEvolutionModal(fingerprintKey, specLabel) {
   evoActiveSites = new Set(bySite.keys()); // toate site-urile active la deschidere
 
   document.getElementById("evoSub").textContent =
-    days.length > 0 ? `${days[0]} → ${days[days.length - 1]}` : "";
+    days.length > 0 ? `${days[0]} → ${days[days.length - 1]}` : "Nu avem istoric pentru această configurație.";
 
   renderEvoModal();
-  document.getElementById("evoModal").classList.add("open");
 }
 
 function toggleEvoSite(site) {
@@ -1148,12 +1296,30 @@ function attachEvoTooltip(wrapId) {
 
 async function init() {
   try {
-    const raw = await fetchData();
+    // incarcam in paralel: fereastra recenta (RECENT_DAYS_WINDOW zile, cu
+    // tot continutul ei) + lista COMPLETA a zilelor disponibile (usoara,
+    // doar date, nu produse) - asa dropdown-urile arata tot istoricul de la
+    // inceput, dar pagina porneste rapid fara sa tragem totul dintr-odata.
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - RECENT_DAYS_WINDOW);
+    const cutoffISO = cutoff.toISOString();
+
+    const [raw, allDaysList] = await Promise.all([
+      fetchData(cutoffISO),
+      fetchAllDaysList(),
+    ]);
+
     allItems = dedupe(raw);
     dayIndex = buildDayIndex(raw);
     sortedDays = Array.from(dayIndex.keys()).sort().reverse();
+    sortedDays.forEach(d => loadedDays.add(d));
 
-    const dateOptions = sortedDays.map((d, i) =>
+    // allDays vine din baza de date si poate include zile mai vechi decat
+    // ce am incarcat eager - dropdown-urile trebuie sa le arate pe toate,
+    // chiar daca datele lor se incarca abia cand sunt selectate.
+    allDays = allDaysList.length > 0 ? allDaysList : [...sortedDays];
+
+    const dateOptions = allDays.map((d, i) =>
       `<option value="${d}">${d}${i === 0 ? " (cel mai recent)" : ""}</option>`).join("");
     document.getElementById("allDate").innerHTML = dateOptions;
     document.getElementById("compareDate").innerHTML = dateOptions;
