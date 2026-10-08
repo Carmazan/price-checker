@@ -684,6 +684,142 @@ def scrape_ultra(page, category_path="tehnica-computer/calculatoare/pentru-jocur
 
 
 # ---------------------------------------------------------------------------
+# Scraper: neocomputer.md
+# ---------------------------------------------------------------------------
+
+# neocomputer.md nu are produse fara stoc pe listare (confirmat) - nu e nevoie
+# de logica de "stop la primul epuizat". Listarea are insa paginare reala
+# (?page=1,2,3...), si categoria "Desktop PC" contine atat PC-uri asamblate
+# de NeoComputer (titlu "Gaming PC NEO X" / "Desktop PC NEO X") cat si PC-uri
+# pre-asamblate de alte branduri (Lenovo/Dell/HP/ASUS) - pastram doar
+# configuratiile proprii NeoComputer, la cererea lui Igor.
+NEO_TITLE_PREFIXES = ("Gaming PC NEO ", "Desktop PC NEO ")
+NEO_SKIP_LINES = {"Detalii", "Preț redus", "Pret redus"}
+
+
+def parse_neo_listing_blocks(text):
+    # Detectam STRUCTURAL orice bloc de produs, indiferent de brand: o linie
+    # e "titlu" daca urmatoarea linie ne-goala contine "·" (specificatiile).
+    # Returnam TOATE blocurile (orice brand) - filtrarea pe NeoComputer se
+    # face separat, ca sa putem detecta corect finalul paginarii (pagina goala
+    # = 0 blocuri in total, nu 0 blocuri NeoComputer).
+    lines = [l.strip() for l in text.split("\n")]
+    results = []
+    i = 0
+    n = len(lines)
+
+    while i < n:
+        line = lines[i]
+        if not line or line in NEO_SKIP_LINES or "·" in line:
+            i += 1
+            continue
+
+        j = i + 1
+        while j < n and lines[j] == "":
+            j += 1
+
+        if j >= n or lines[j].count("·") < 2:
+            i += 1
+            continue
+
+        title = line
+        specs_line = lines[j]
+
+        k = j + 1
+        price_lines = []
+        while k < n and lines[k] != "Detalii":
+            if lines[k] != "":
+                price_lines.append(lines[k])
+            k += 1
+
+        if k >= n:
+            break  # nu am gasit "Detalii" - bloc incomplet, oprim
+
+        pret_vechi = None
+        reducere_lei = None
+        pret = None
+
+        if len(price_lines) >= 3:
+            pret_vechi = clean_price(price_lines[0])
+            reducere_lei = clean_price(price_lines[1])
+            pret = clean_price(price_lines[2])
+        elif len(price_lines) == 1:
+            pret = clean_price(price_lines[0])
+
+        results.append({
+            "titlu": title,
+            "cpu_raw": specs_line,
+            "pret": pret,
+            "pret_vechi": pret_vechi,
+            "reducere_lei": reducere_lei,
+        })
+        i = k
+
+    return results
+
+
+def build_neo_title_link_map(page):
+    mapping = {}
+    for a in page.locator("a").all():
+        try:
+            href = a.get_attribute("href")
+            if not href:
+                continue
+            txt = a.inner_text()
+        except Exception:
+            continue
+        for line in txt.split("\n"):
+            line = line.strip()
+            if line and line not in mapping:
+                mapping[line] = href
+    return mapping
+
+
+def scrape_neo(page, max_pages=20):
+    results = []
+    base_url = "https://neocomputer.md/pc-uri-si-componente/computere/desktop-pc?page={}"
+
+    for page_number in range(1, max_pages + 1):
+        page.goto(base_url.format(page_number), wait_until="networkidle", timeout=60000)
+        page.wait_for_timeout(1200)
+        page.mouse.wheel(0, 3000)
+        page.wait_for_timeout(600)
+
+        body_text = page.locator("body").inner_text()
+        blocks = parse_neo_listing_blocks(body_text)
+
+        if not blocks:
+            break  # pagina fara niciun produs = am trecut de ultima pagina
+
+        title_links = build_neo_title_link_map(page)
+        neo_blocks = [b for b in blocks if b["titlu"].startswith(NEO_TITLE_PREFIXES)]
+
+        for b in neo_blocks:
+            href = title_links.get(b["titlu"])
+            if not href or not b["pret"]:
+                continue
+
+            reducere_proc = None
+            if b["pret"] and b["pret_vechi"]:
+                reducere_proc = round((b["reducere_lei"] / b["pret_vechi"]) * 100, 1)
+
+            results.append({
+                "site": "neocomputer.md",
+                "titlu": b["titlu"],
+                "cpu_raw": b["cpu_raw"],
+                "pret": b["pret"],
+                "pret_vechi": b["pret_vechi"],
+                "reducere_lei": b["reducere_lei"],
+                "reducere_proc": reducere_proc,
+                "cashback": None,
+                "stoc": "În stoc",
+                "link": href,
+            })
+
+    return results
+
+
+# ---------------------------------------------------------------------------
 # Insert in Supabase
 # ---------------------------------------------------------------------------
 
@@ -798,6 +934,12 @@ def main():
         ultra_results = scrape_ultra(page)
         print(f"  {len(ultra_results)} produse")
         all_results.extend(ultra_results)
+        time.sleep(2)
+
+        print("Scraping neocomputer.md...")
+        neo_results = scrape_neo(page)
+        print(f"  {len(neo_results)} produse")
+        all_results.extend(neo_results)
 
         browser.close()
 
