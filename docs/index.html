@@ -173,6 +173,7 @@
   .site-xstore { background: rgba(255,166,87,0.15); color: #ffa657; }
   .site-darwin { background: rgba(188,140,255,0.15); color: #bc8cff; }
   .site-ultra { background: rgba(57,208,216,0.15); color: #39d0d8; }
+  .site-neo { background: rgba(247,118,142,0.15); color: #f7768e; }
 
   .price { font-family: var(--mono); font-weight: 600; }
   .price-old { font-family: var(--mono); color: var(--muted); text-decoration: line-through; font-size: 12px; }
@@ -397,6 +398,7 @@
         <option value="xstore.md">xstore.md</option>
         <option value="darwin.md">darwin.md</option>
         <option value="ultra.md">ultra.md</option>
+        <option value="neocomputer.md">neocomputer.md</option>
       </select>
       <select id="compareSort">
         <option value="diff-desc">Diferență preț: mare → mică</option>
@@ -419,6 +421,7 @@
         <option value="xstore.md">xstore.md</option>
         <option value="darwin.md">darwin.md</option>
         <option value="ultra.md">ultra.md</option>
+        <option value="neocomputer.md">neocomputer.md</option>
       </select>
       <select id="allSort">
         <option value="pret-asc">Preț: crescător</option>
@@ -459,6 +462,7 @@
         <option value="xstore.md">xstore.md</option>
         <option value="darwin.md">darwin.md</option>
         <option value="ultra.md">ultra.md</option>
+        <option value="neocomputer.md">neocomputer.md</option>
       </select>
     </div>
     <div class="status-line" id="changesStatus"></div>
@@ -525,6 +529,7 @@ const SITE_CLASSES = {
   "xstore.md": "site-xstore",
   "darwin.md": "site-darwin",
   "ultra.md": "site-ultra",
+  "neocomputer.md": "site-neo",
 };
 
 function siteClass(site) {
@@ -1099,7 +1104,7 @@ document.getElementById("evoModal").addEventListener("click", (e) => {
   if (e.target.id === "evoModal") closeEvolutionModal();
 });
 
-const SITE_COLORS = { "enter.online": "#58a6ff", "xstore.md": "#ffa657", "darwin.md": "#bc8cff", "ultra.md": "#39d0d8" };
+const SITE_COLORS = { "enter.online": "#58a6ff", "xstore.md": "#ffa657", "darwin.md": "#bc8cff", "ultra.md": "#39d0d8", "neocomputer.md": "#f7768e" };
 
 let evoBySite = new Map();   // site -> [{day, pret, magazineStoc}]
 let evoDays = [];
