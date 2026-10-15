@@ -784,11 +784,21 @@ async function ensureDayLoaded(day) {
 async function fetchFullHistoryForFingerprint(fingerprintKey) {
   // istoric complet, nelimitat de fereastra de 30 de zile - folosit doar de
   // modalul de Evolutie, care trebuie sa arate TOT istoricul unei configuratii.
-  const url = `${SUPABASE_URL}/rest/v1/products_fingerprint?select=fingerprint_key,products_raw(site,pret,magazine_stoc,scraped_at)` +
-    `&fingerprint_key=eq.${encodeURIComponent(fingerprintKey)}&order=raw_id.asc&limit=5000`;
-  const res = await fetch(url, { headers: HEADERS });
-  if (!res.ok) throw new Error(`Supabase a raspuns cu ${res.status}`);
-  return res.json();
+  // Supabase limiteaza fiecare raspuns la ~1000 randuri indiferent de limit,
+  // deci paginam cu offset - altfel graficul se oprea la cele mai vechi 1000
+  // randuri (ex: se oprea la 09.10 desi datele merg pana azi).
+  const pageSize = 1000;
+  let all = [];
+  for (let page = 0; page < 40; page++) {
+    const url = `${SUPABASE_URL}/rest/v1/products_fingerprint?select=fingerprint_key,products_raw(site,pret,magazine_stoc,scraped_at)` +
+      `&fingerprint_key=eq.${encodeURIComponent(fingerprintKey)}&order=raw_id.asc&limit=${pageSize}&offset=${page * pageSize}`;
+    const res = await fetch(url, { headers: HEADERS });
+    if (!res.ok) throw new Error(`Supabase a raspuns cu ${res.status}`);
+    const batch = await res.json();
+    all = all.concat(batch);
+    if (batch.length < pageSize) break;
+  }
+  return all;
 }
 
 function dedupe(rows) {
