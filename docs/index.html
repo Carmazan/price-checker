@@ -1156,7 +1156,7 @@ function renderAll() {
         <td>${raw.cashback ? formatPrice(raw.cashback) : "—"}</td>
         <td>${raw.magazine_stoc != null ? raw.magazine_stoc : "—"}</td>
         <td style="color:var(--muted); font-size:11px;">${formatDate(raw.scraped_at)}</td>
-        <td>${hasFingerprint ? `<button class="evo-btn" data-fp="${fpKey}" data-spec="${(specLine || raw.titlu).replace(/"/g, "&quot;")}">Evoluție</button>` : ""}</td>
+        <td>${raw.link ? listingEvoButton(raw.site, raw.link, raw.titlu) : ""}</td>
       </tr>`;
   }).join("");
 }
@@ -1241,13 +1241,13 @@ document.getElementById("topgpuDate").addEventListener("change", () =>
 ["compareList", "allTableBody"].forEach(id => {
   document.getElementById(id).addEventListener("click", (e) => {
     const btn = e.target.closest(".evo-btn");
-    if (!btn) return;
+    if (!btn || btn.classList.contains("listing-evo-btn")) return;
     openEvolutionModal(btn.dataset.fp, btn.dataset.spec);
   });
 });
 
 // evolutie per produs (site+link) direct din tab-ul Vanzari
-["salesTopList", "salesGoneList"].forEach(id => {
+["salesTopList", "salesGoneList", "allTableBody"].forEach(id => {
   document.getElementById(id).addEventListener("click", (e) => {
     const btn = e.target.closest(".listing-evo-btn");
     if (!btn) return;
