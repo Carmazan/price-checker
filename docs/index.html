@@ -279,6 +279,7 @@
   }
 
   .evo-btn:hover { color: var(--accent); border-color: var(--accent); }
+  .sales-dates { font-size: 11px; color: var(--muted, #8b949e); font-family: ui-monospace, Menlo, Consolas, monospace; margin-top: 3px; line-height: 1.5; }
 
   .modal-overlay {
     display: none;
@@ -613,7 +614,7 @@
     </div>
     <div class="status-line" id="salesStatus"></div>
     <div class="status-line" style="margin-top:-12px; margin-bottom:20px;">
-      Estimare bazată pe scăderea numărului de magazine cu stoc între zile consecutive (doar enter.online și darwin.md au această informație). O creștere a numărului de magazine e tratată ca reaprovizionare, nu ca vânzare negativă.
+      Estimare: scădere a numărului de magazine cu stoc între zile consecutive = vânzări (prețul luat din ziua dinaintea vânzării). O creștere = reaprovizionare/asamblare, nu vânzare negativă. Dacă un produs dispare din listare cu ultimul stoc N &gt; 1, se numără N−1 vânzări (ultimul stoc 1 → nenumărat, poate fi doar retras). Nu se numără dispariția dacă scrape-ul zilei a fost incomplet sau produsul reapare a doua zi. Doar enter.online și darwin.md.
     </div>
 
     <div class="stat-grid" id="salesStatGrid"></div>
@@ -634,7 +635,7 @@
     <button class="evo-btn" id="salesShowAllBtn" style="margin-top:10px; display:none;"></button>
 
     <div class="evo-chart-title" id="salesGoneTitle" style="display:none;">
-      Produse dispărute din listare (posibil stoc epuizat complet — nu sunt incluse în totalul de mai sus)
+      Produse dispărute din listare (cele marcate „numărat" sunt incluse în totalul de mai sus)
     </div>
     <div id="salesGoneList"></div>
   </div>
@@ -1245,6 +1246,15 @@ document.getElementById("topgpuDate").addEventListener("change", () =>
   });
 });
 
+// evolutie per produs (site+link) direct din tab-ul Vanzari
+["salesTopList", "salesGoneList"].forEach(id => {
+  document.getElementById(id).addEventListener("click", (e) => {
+    const btn = e.target.closest(".listing-evo-btn");
+    if (!btn) return;
+    openListingEvolutionModal(btn.dataset.site, decodeURIComponent(btn.dataset.link), btn.dataset.title);
+  });
+});
+
 document.getElementById("evoClose").addEventListener("click", closeEvolutionModal);
 document.getElementById("evoModal").addEventListener("click", (e) => {
   if (e.target.id === "evoModal") closeEvolutionModal();
@@ -1483,6 +1493,91 @@ function trendHtml(current, previous) {
   return `<span class="trend-chip ${cls}">${arrow} ${Math.abs(pct).toFixed(0)}%</span>`;
 }
 
+function escAttr(s) {
+  return String(s ?? "").replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+}
+
+function formatSaleDates(datesMap) {
+  // "2026-10-12 ×1 · 2026-10-14 ×2 (epuizat)" - cronologic
+  const entries = Array.from(datesMap.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+  const parts = entries.map(([day, d]) =>
+    `${day} ×${d.units}${d.gone ? " (epuizat)" : ""}`);
+  const maxShown = 8;
+  if (parts.length <= maxShown) return "Vândut: " + parts.join(" · ");
+  return `Vândut: ${parts.slice(0, maxShown).join(" · ")} · +${parts.length - maxShown} zile ` +
+         `<span title="${escAttr(parts.join("\n"))}" style="cursor:help;">(toate)</span>`;
+}
+
+function listingEvoButton(site, link, titlu) {
+  return `<button class="evo-btn listing-evo-btn" data-site="${escAttr(site)}" ` +
+         `data-link="${escAttr(encodeURIComponent(link))}" data-title="${escAttr(titlu)}">Evoluție</button>`;
+}
+
+async function fetchListingHistory(site, link) {
+  // istoricul UNUI singur produs (site + link), nu al intregii configuratii
+  // - asa vedem exact cand a aparut si cand a disparut produsul respectiv
+  const pageSize = 1000;
+  let all = [];
+  for (let page = 0; page < 10; page++) {
+    const url = `${SUPABASE_URL}/rest/v1/products_raw?select=site,pret,magazine_stoc,scraped_at` +
+      `&site=eq.${encodeURIComponent(site)}&link=eq.${encodeURIComponent(link)}` +
+      `&order=scraped_at.asc&limit=${pageSize}&offset=${page * pageSize}`;
+    const res = await fetch(url, { headers: HEADERS });
+    if (!res.ok) throw new Error(`Supabase a raspuns cu ${res.status}`);
+    const batch = await res.json();
+    all = all.concat(batch);
+    if (batch.length < pageSize) break;
+  }
+  return all;
+}
+
+async function openListingEvolutionModal(site, link, titlu) {
+  document.getElementById("evoTitle").textContent = titlu;
+  document.getElementById("evoSub").textContent = "Se încarcă istoricul produsului...";
+  document.getElementById("evoChartWrap").innerHTML = "";
+  document.getElementById("evoStockChartWrap").innerHTML = "";
+  document.getElementById("evoLegend").innerHTML = "";
+  document.getElementById("evoModal").classList.add("open");
+
+  let rows;
+  try {
+    rows = await fetchListingHistory(site, link);
+  } catch (err) {
+    document.getElementById("evoSub").textContent = `Eroare la încărcarea istoricului: ${err.message}`;
+    console.error(err);
+    return;
+  }
+
+  // un singur punct pe zi: ultimul scrape al zilei (ca in calculul vanzarilor)
+  const byDay = new Map();
+  for (const r of rows) {
+    if (r.pret == null) continue;
+    const day = dayStr(r.scraped_at);
+    const ex = byDay.get(day);
+    if (!ex || new Date(r.scraped_at) > new Date(ex.scraped_at)) byDay.set(day, r);
+  }
+
+  const days = Array.from(byDay.keys()).sort();
+  evoBySite = new Map([[site, days.map(d => ({
+    day: d, pret: byDay.get(d).pret, magazineStoc: byDay.get(d).magazine_stoc,
+  }))]]);
+  evoDays = days;
+  evoActiveSites = new Set([site]);
+
+  if (days.length === 0) {
+    document.getElementById("evoSub").textContent = "Nu avem istoric pentru acest produs.";
+    return;
+  }
+
+  const lastDay = days[days.length - 1];
+  const latestScrapeDay = allDays.length ? allDays[0] : null;
+  let sub = `${days[0]} → ${lastDay} · doar acest produs (${site})`;
+  if (latestScrapeDay && lastDay < latestScrapeDay) sub += ` · nu mai apare în listare după ${lastDay}`;
+  document.getElementById("evoSub").textContent = sub;
+
+  renderEvoModal();
+}
+
 async function fetchSalesRows(startISO, endISOExclusive) {
   const pageSize = 1000;
   const maxPages = 50;
@@ -1523,6 +1618,24 @@ function buildSalesDayIndex(rows) {
   return byDay;
 }
 
+// Reguli de calcul (stabilite cu Igor):
+//  1) stocul scade N -> M (M < N): se considera vandute N - M bucati;
+//  2) stocul creste: nu se numara nimic (reaprovizionare / PC-uri noi asamblate);
+//  3) produsul dispare din listare (epuizat) dupa ce ultimul stoc cunoscut era N > 1:
+//     se considera vandute N - 1 bucati (daca ultimul stoc era 1, nu se numara nimic);
+//  4) valoarea vanzarii se calculeaza cu pretul din ziua PRECEDENTA vanzarii.
+// Doua protectii impotriva falselor "dispariti": ziua in care scraping-ul unui site
+// a fost incomplet (sub jumatate din produsele zilei anterioare) si produsele care
+// reapar chiar in urmatoarea zi (simpla eroare de scraping, nu vanzare).
+const DISAPPEAR_KEEP_UNITS = 1;
+const PARTIAL_SCRAPE_RATIO = 0.5;
+
+function countBySite(dayMap) {
+  const counts = new Map();
+  for (const v of dayMap.values()) counts.set(v.site, (counts.get(v.site) || 0) + 1);
+  return counts;
+}
+
 function computeSalesEvents(salesDayIndex, rangeStartDay) {
   const days = Array.from(salesDayIndex.keys()).sort(); // cronologic, cel mai vechi primul
   const events = [];
@@ -1535,6 +1648,9 @@ function computeSalesEvents(salesDayIndex, rangeStartDay) {
 
     const prevMap = salesDayIndex.get(prevDay);
     const currMap = salesDayIndex.get(currDay);
+    const nextMap = i + 1 < days.length ? salesDayIndex.get(days[i + 1]) : null;
+    const prevCounts = countBySite(prevMap);
+    const currCounts = countBySite(currMap);
 
     for (const [key, curr] of currMap.entries()) {
       const prev = prevMap.get(key);
@@ -1543,28 +1659,61 @@ function computeSalesEvents(salesDayIndex, rangeStartDay) {
       const diff = prev.magazine_stoc - curr.magazine_stoc;
       if (diff > 0) {
         events.push({
+          kind: "drop",
           day: currDay,
           site: curr.site,
           link: curr.link,
           titlu: curr.titlu,
           specLine: [curr.cpu, curr.gpu, curr.ram, curr.ssd].filter(Boolean).join(" · "),
           units: diff,
-          pret: curr.pret,
-          revenue: diff * (curr.pret || 0),
+          pret: prev.pret, // pretul din ziua precedenta vanzarii
+          revenue: diff * (prev.pret || 0),
         });
       }
     }
 
-    // produse care dispar complet din listare de pe o zi pe alta - poate
-    // insemna ca s-a vandut tot stocul ramas, dar poate insemna si ca a fost
-    // scoasa configuratia din vanzare - nu numaram, doar semnalam separat
     for (const [key, prev] of prevMap.entries()) {
-      if (!currMap.has(key)) {
-        disappeared.push({
-          day: currDay, site: prev.site, link: prev.link, titlu: prev.titlu,
-          lastStoc: prev.magazine_stoc,
+      if (currMap.has(key)) continue;
+
+      const prevCount = prevCounts.get(prev.site) || 0;
+      const currCount = currCounts.get(prev.site) || 0;
+      const lastStoc = prev.magazine_stoc;
+
+      let counted = false;
+      let units = 0;
+      let reason = "";
+
+      if (currCount === 0 || currCount < prevCount * PARTIAL_SCRAPE_RATIO) {
+        reason = "scraping incomplet pentru site în ziua respectivă";
+      } else if (nextMap && nextMap.has(key)) {
+        reason = "a reapărut în ziua următoare";
+      } else if (lastStoc <= DISAPPEAR_KEEP_UNITS) {
+        reason = "ultimul stoc cunoscut era 1";
+      } else {
+        counted = true;
+        units = lastStoc - DISAPPEAR_KEEP_UNITS;
+      }
+
+      const specLine = [prev.cpu, prev.gpu, prev.ram, prev.ssd].filter(Boolean).join(" · ");
+
+      if (counted) {
+        events.push({
+          kind: "gone",
+          day: currDay,
+          site: prev.site,
+          link: prev.link,
+          titlu: prev.titlu,
+          specLine,
+          units,
+          pret: prev.pret, // ultimul pret cunoscut = pretul din ziua precedenta
+          revenue: units * (prev.pret || 0),
         });
       }
+
+      disappeared.push({
+        day: currDay, site: prev.site, link: prev.link, titlu: prev.titlu,
+        lastStoc, counted, units, reason,
+      });
     }
   }
 
@@ -1604,11 +1753,17 @@ function aggregateTopProducts(events) {
   for (const e of events) {
     const key = e.site + "|" + e.link;
     if (!map.has(key)) {
-      map.set(key, { titlu: e.titlu, specLine: e.specLine, site: e.site, link: e.link, units: 0, revenue: 0 });
+      map.set(key, { titlu: e.titlu, specLine: e.specLine, site: e.site, link: e.link, units: 0, revenue: 0, dates: new Map() });
     }
     const agg = map.get(key);
     agg.units += e.units;
     agg.revenue += e.revenue;
+
+    // data(ile) la care s-au detectat vanzarile pentru acest produs
+    const d = agg.dates.get(e.day) || { units: 0, gone: false };
+    d.units += e.units;
+    if (e.kind === "gone") d.gone = true;
+    agg.dates.set(e.day, d);
   }
   return Array.from(map.values()).sort((a, b) => b.units - a.units);
 }
@@ -1834,11 +1989,15 @@ function renderSalesTopList(events) {
           <div style="min-width:0;">
             <div><span class="site-badge ${siteClass(p.site)}">${p.site}</span> <a class="prod-link" href="${p.link}" target="_blank" rel="noopener">${p.titlu}</a></div>
             <div class="prod-spec">${p.specLine}</div>
+            <div class="sales-dates">${formatSaleDates(p.dates)}</div>
           </div>
         </div>
-        <div style="text-align:right; white-space:nowrap;">
-          <div class="price">${p.units} buc.</div>
-          <div class="prod-spec">${formatPrice(p.revenue)}</div>
+        <div style="display:flex; align-items:center; gap:14px;">
+          <div style="text-align:right; white-space:nowrap;">
+            <div class="price">${p.units} buc.</div>
+            <div class="prod-spec">${formatPrice(p.revenue)}</div>
+          </div>
+          ${listingEvoButton(p.site, p.link, p.titlu)}
         </div>
       </div>`).join("");
   }
@@ -1865,8 +2024,16 @@ function renderSalesDisappeared(disappeared) {
   title.style.display = "block";
   list.innerHTML = disappeared.map(d => `
     <div class="sales-top-row">
-      <div><span class="site-badge ${siteClass(d.site)}">${d.site}</span> <a class="prod-link" href="${d.link}" target="_blank" rel="noopener">${d.titlu}</a></div>
-      <div class="prod-spec">dispărut pe ${d.day} (ultimul stoc cunoscut: ${d.lastStoc} magazine)</div>
+      <div style="min-width:0;">
+        <div><span class="site-badge ${siteClass(d.site)}">${d.site}</span> <a class="prod-link" href="${d.link}" target="_blank" rel="noopener">${d.titlu}</a></div>
+        <div class="prod-spec">dispărut pe ${d.day} · ultimul stoc cunoscut: ${d.lastStoc} ${d.lastStoc === 1 ? "magazin" : "magazine"}</div>
+      </div>
+      <div style="display:flex; align-items:center; gap:14px;">
+        <div class="prod-spec" style="text-align:right; ${d.counted ? "color:var(--good);" : ""}">
+          ${d.counted ? `numărat: ${d.units} buc.` : `nenumărat (${d.reason})`}
+        </div>
+        ${listingEvoButton(d.site, d.link, d.titlu)}
+      </div>
     </div>`).join("");
 }
 
