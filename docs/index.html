@@ -790,7 +790,7 @@ async function fetchFullHistoryForFingerprint(fingerprintKey) {
   const pageSize = 1000;
   let all = [];
   for (let page = 0; page < 40; page++) {
-    const url = `${SUPABASE_URL}/rest/v1/products_fingerprint?select=fingerprint_key,products_raw(site,pret,magazine_stoc,scraped_at)` +
+    const url = `${SUPABASE_URL}/rest/v1/products_fingerprint?select=fingerprint_key,products_raw(site,link,pret,magazine_stoc,scraped_at)` +
       `&fingerprint_key=eq.${encodeURIComponent(fingerprintKey)}&order=raw_id.asc&limit=${pageSize}&offset=${page * pageSize}`;
     const res = await fetch(url, { headers: HEADERS });
     if (!res.ok) throw new Error(`Supabase a raspuns cu ${res.status}`);
@@ -1306,10 +1306,18 @@ async function openEvolutionModal(fingerprintKey, specLabel) {
   // aceeasi zi (modele diferite, acelasi CPU/GPU/RAM/SSD) - pastram doar
   // cel mai mic pret gasit, un singur punct per site per zi (si numarul de
   // magazine al acelui produs specific, pentru tooltip si al doilea grafic)
-  const byDay = new Map(); // day -> site -> {pret, magazineStoc}
+  // Pas 1: pentru fiecare produs (site+link) pastram doar ULTIMUL scrape al zilei.
+  // Pas 2: intre produsele aceluiasi site din ziua respectiva alegem pe cel mai IEFTIN.
+  const latestPerListing = new Map(); // day|site|link -> raw
   for (const row of rows) {
     const raw = row.products_raw;
     if (!raw || raw.pret == null) continue;
+    const k = dayStr(raw.scraped_at) + "|" + raw.site + "|" + (raw.link || "");
+    const ex = latestPerListing.get(k);
+    if (!ex || new Date(raw.scraped_at) > new Date(ex.scraped_at)) latestPerListing.set(k, raw);
+  }
+  const byDay = new Map(); // day -> site -> {pret, magazineStoc}
+  for (const raw of latestPerListing.values()) {
     const day = dayStr(raw.scraped_at);
     if (!byDay.has(day)) byDay.set(day, new Map());
     const dayMap = byDay.get(day);
