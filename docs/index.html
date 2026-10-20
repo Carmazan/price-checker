@@ -733,29 +733,37 @@ async function fetchAllDaysList() {
 }
 
 async function fetchDayDetail(day) {
-  // fetch complet pentru O zi anume (pentru incarcare lazy la selectare in dropdown)
+  // fetch complet pentru O zi anume. IMPORTANT: products_raw!inner face ca filtrul
+  // pe scraped_at sa elimine si randurile parinte (altfel Supabase parcurgea TOT
+  // tabelul products_fingerprint, returnand null pentru zilele vechi - foarte lent).
   const dayStart = `${day}T00:00:00`;
   const nextDay = new Date(`${day}T00:00:00Z`);
   nextDay.setUTCDate(nextDay.getUTCDate() + 1);
   const dayEnd = nextDay.toISOString().slice(0, 19);
 
   const pageSize = 1000;
-  const maxPages = 20;
-  let allRows = [];
-  let offset = 0;
-
-  for (let page = 0; page < maxPages; page++) {
-    const url = `${SUPABASE_URL}/rest/v1/products_fingerprint?select=fingerprint_key,cpu_model,gpu_model,ram_gb,ssd_gb,products_raw(${PRODUCTS_SELECT})` +
-      `&order=raw_id.desc&limit=${pageSize}&offset=${offset}` +
-      `&products_raw.scraped_at=gte.${dayStart}&products_raw.scraped_at=lt.${dayEnd}`;
-    const res = await fetch(url, { headers: HEADERS });
+  const pageUrl = (page) =>
+    `${SUPABASE_URL}/rest/v1/products_fingerprint?select=fingerprint_key,cpu_model,gpu_model,ram_gb,ssd_gb,products_raw!inner(${PRODUCTS_SELECT})` +
+    `&order=raw_id.desc&limit=${pageSize}&offset=${page * pageSize}` +
+    `&products_raw.scraped_at=gte.${dayStart}&products_raw.scraped_at=lt.${dayEnd}`;
+  const getPage = async (page) => {
+    const res = await fetch(pageUrl(page), { headers: HEADERS });
     if (!res.ok) throw new Error(`Supabase a raspuns cu ${res.status}`);
-    const batch = await res.json();
-    allRows = allRows.concat(batch);
-    if (batch.length < pageSize) break;
-    offset += pageSize;
-  }
+    return res.json();
+  };
 
+  // primele 3 pagini in paralel (o zi are de obicei ~1000-3000 randuri), restul la nevoie
+  let allRows = [];
+  let page = 0;
+  const first = await Promise.all([getPage(0), getPage(1), getPage(2)]);
+  for (const batch of first) allRows = allRows.concat(batch);
+  page = 3;
+  let lastFull = first[2].length === pageSize;
+  while (lastFull && page < 20) {
+    const batch = await getPage(page++);
+    allRows = allRows.concat(batch);
+    lastFull = batch.length === pageSize;
+  }
   return allRows;
 }
 
@@ -847,12 +855,14 @@ function findCompetitor(fingerprintKey, ownSite, dayMap) {
 }
 
 function computeChanges(selectedDay) {
-  const days = sortedDays;
-  if (days.length < 1) return { today: null, yesterday: null, added: [], removed: [], changed: [] };
+  // adiacenta zilelor se stabileste pe lista COMPLETA (allDays), nu doar pe zilele incarcate
+  const days = allDays.length ? allDays : sortedDays;
+  if (sortedDays.length < 1) return { today: null, yesterday: null, added: [], removed: [], changed: [] };
 
-  const today = selectedDay && dayIndex.has(selectedDay) ? selectedDay : days[0];
+  const today = selectedDay && dayIndex.has(selectedDay) ? selectedDay : sortedDays[0];
   const idx = days.indexOf(today);
-  const yesterday = idx !== -1 && idx + 1 < days.length ? days[idx + 1] : null;
+  let yesterday = idx !== -1 && idx + 1 < days.length ? days[idx + 1] : null;
+  if (yesterday && !dayIndex.has(yesterday)) yesterday = null;
 
   const todayMap = dayIndex.get(today);
   const yesterdayMap = yesterday ? dayIndex.get(yesterday) : new Map();
@@ -2159,28 +2169,20 @@ document.getElementById("salesPresetAll").addEventListener("click", () => {
 
 async function init() {
   try {
-    // incarcam in paralel: fereastra recenta (RECENT_DAYS_WINDOW zile, cu
-    // tot continutul ei) + lista COMPLETA a zilelor disponibile (usoara,
-    // doar date, nu produse) - asa dropdown-urile arata tot istoricul de la
-    // inceput, dar pagina porneste rapid fara sa tragem totul dintr-odata.
-    const cutoff = new Date();
-    cutoff.setDate(cutoff.getDate() - RECENT_DAYS_WINDOW);
-    const cutoffISO = cutoff.toISOString();
+    // Pornire rapida: lista zilelor (usoara), apoi DOAR ultima zi + cea dinaintea ei
+    // (pentru tab-ul Schimbari), in paralel. Restul zilelor se incarca la cerere
+    // cand le alegi in dropdown, iar tab-urile Evolutie/Vanzari isi cer singure datele.
+    allDays = await fetchAllDaysList();
+    if (allDays.length === 0) throw new Error("Nu exista date in baza de date.");
 
-    const [raw, allDaysList] = await Promise.all([
-      fetchData(cutoffISO),
-      fetchAllDaysList(),
-    ]);
-
-    allItems = dedupe(raw);
-    dayIndex = buildDayIndex(raw);
+    const initialDays = allDays.slice(0, 2);
+    const dayRows = await Promise.all(initialDays.map(fetchDayDetail));
+    dayRows.forEach(rows => mergeRowsIntoDayIndex(rows));
+    initialDays.forEach(d => loadedDays.add(d));
     sortedDays = Array.from(dayIndex.keys()).sort().reverse();
-    sortedDays.forEach(d => loadedDays.add(d));
 
-    // allDays vine din baza de date si poate include zile mai vechi decat
-    // ce am incarcat eager - dropdown-urile trebuie sa le arate pe toate,
-    // chiar daca datele lor se incarca abia cand sunt selectate.
-    allDays = allDaysList.length > 0 ? allDaysList : [...sortedDays];
+    const latestMap = dayIndex.get(allDays[0]) || new Map();
+    allItems = Array.from(latestMap.values());
 
     const dateOptions = allDays.map((d, i) =>
       `<option value="${d}">${d}${i === 0 ? " (cel mai recent)" : ""}</option>`).join("");
