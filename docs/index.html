@@ -1664,7 +1664,7 @@ function countBySite(dayMap) {
   return counts;
 }
 
-function computeSalesEvents(salesDayIndex, rangeStartDay) {
+function computeSalesEvents(salesDayIndex, rangeStartDay, rangeEndDay) {
   const days = Array.from(salesDayIndex.keys()).sort(); // cronologic, cel mai vechi primul
   const events = [];
   const disappeared = [];
@@ -1673,6 +1673,7 @@ function computeSalesEvents(salesDayIndex, rangeStartDay) {
     const prevDay = days[i - 1];
     const currDay = days[i];
     if (currDay < rangeStartDay) continue; // ne intereseaza doar evenimentele din perioada ceruta
+    if (rangeEndDay && currDay > rangeEndDay) continue; // ziua de dupa perioada e incarcata doar pentru confirmare
 
     const prevMap = salesDayIndex.get(prevDay);
     const currMap = salesDayIndex.get(currDay);
@@ -1805,7 +1806,7 @@ async function computePrevPeriodTotals(fromVal, toVal) {
 
   const marginStart = addDaysStr(prevFrom, -1);
   const startISO = marginStart + "T00:00:00.000Z";
-  const endISO = addDaysStr(prevTo, 1) + "T00:00:00.000Z";
+  const endISO = addDaysStr(prevTo, 2) + "T00:00:00.000Z"; // +1 zi pentru confirmarea disparitiilor
 
   let rows;
   try {
@@ -1816,7 +1817,7 @@ async function computePrevPeriodTotals(fromVal, toVal) {
   }
 
   const dayIdx = buildSalesDayIndex(rows);
-  const { events } = computeSalesEvents(dayIdx, prevFrom);
+  const { events } = computeSalesEvents(dayIdx, prevFrom, prevTo);
 
   const bySite = new Map();
   for (const site of SALES_SITES) bySite.set(site, { units: 0, revenue: 0 });
@@ -2082,7 +2083,7 @@ async function renderSalesTab() {
   const startISO = marginStart.toISOString();
 
   const endExclusive = new Date(toVal + "T00:00:00Z");
-  endExclusive.setUTCDate(endExclusive.getUTCDate() + 1);
+  endExclusive.setUTCDate(endExclusive.getUTCDate() + 2); // +1 zi pentru confirmarea disparitiilor
   const endISO = endExclusive.toISOString();
 
   let rows, prevTotals;
@@ -2098,7 +2099,7 @@ async function renderSalesTab() {
   }
 
   const salesDayIndex = buildSalesDayIndex(rows);
-  const { events, disappeared } = computeSalesEvents(salesDayIndex, fromVal);
+  const { events, disappeared } = computeSalesEvents(salesDayIndex, fromVal, toVal);
 
   salesEventsCache = { events, disappeared };
   salesPrevTotalsCache = prevTotals;
