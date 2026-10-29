@@ -2,8 +2,10 @@ name: Scraping zilnic preturi PC
 
 on:
   schedule:
-    # 06:00 UTC = 09:00 ora Chisinau (vara) / 08:00 (iarna)
-    - cron: "5 8 * * *"
+    # Declansam noaptea: job-ul asteapta in coada pana porneste PC-ul (runner self-hosted),
+    # apoi ruleaza imediat. GitHub tine job-urile in coada maxim 24h.
+    # 00:07 UTC = 02:07 ora Chisinau iarna (03:07 vara). In fiecare zi (PC-ul ramane pornit, blocat cu Win+L, si in weekend).
+    - cron: "7 0 * * *"
   workflow_dispatch: {}   # permite rulare manuala din tab-ul Actions
 
 jobs:
