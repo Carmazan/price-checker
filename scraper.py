@@ -87,13 +87,20 @@ def normalize_ram_gb(text):
     return candidates[0] if candidates else None
 
 
+# Aceeasi capacitate e scrisa diferit pe site-uri (500GB vs 512GB, 1TB vs 1024GB).
+# Le aducem la valoarea zecimala, ca sa fie considerate aceeasi configuratie.
+SSD_CANONICAL_GB = {256: 250, 512: 500, 1024: 1000, 2048: 2000, 4096: 4000}
+
+
 def normalize_ssd_gb(text):
     tb_match = re.search(r"(\d+)\s*TB", text, re.IGNORECASE)
     if tb_match:
         return int(tb_match.group(1)) * 1000
     gb_matches = re.findall(r"(\d+)\s*GB", text, re.IGNORECASE)
     candidates = [int(m) for m in gb_matches if int(m) > 128]
-    return candidates[0] if candidates else None
+    if not candidates:
+        return None
+    return SSD_CANONICAL_GB.get(candidates[0], candidates[0])
 
 
 def clean_price(text):
@@ -484,6 +491,11 @@ def verify_darwin_stock(page, candidates):
     verified = []
     total = len(candidates)
     checked = 0
+    # Nu ne oprim la PRIMUL produs fara stoc: ordinea din listare poate varia intre
+    # rulari (un produs in stoc poate ajunge dupa unul epuizat si ar fi pierdut,
+    # aparand fals ca "vandut"). Ne oprim abia dupa N produse consecutive fara stoc.
+    MAX_CONSECUTIVE_MISSES = 8
+    misses = 0
 
     for idx, item in enumerate(candidates):
         link = item["link"]
@@ -505,8 +517,11 @@ def verify_darwin_stock(page, candidates):
             buy_idx = text.find("Cumpără")
 
             if buy_idx == -1:
-                print(f"  Darwin: primul produs fara stoc la pozitia {checked}: {link}")
-                break
+                misses += 1
+                print(f"  Darwin: produs fara stoc la pozitia {checked} ({misses}/{MAX_CONSECUTIVE_MISSES} consecutive): {link}")
+                if misses >= MAX_CONSECUTIVE_MISSES:
+                    break
+                continue
 
             window = text[max(0, buy_idx - 250):buy_idx]
             lines = [l.strip() for l in window.split("\n") if l.strip()]
@@ -519,7 +534,12 @@ def verify_darwin_stock(page, candidates):
 
             if not price_lines:
                 print(f"  [diagnostic] 'Cumpără' gasit dar nicio linie de pret la produsul {checked}: {link}")
-                break
+                misses += 1
+                if misses >= MAX_CONSECUTIVE_MISSES:
+                    break
+                continue
+
+            misses = 0  # produs in stoc gasit - resetam contorul
 
             if len(price_lines) == 1:
                 item["pret"] = price_lines[0]
@@ -550,8 +570,11 @@ def verify_darwin_stock(page, candidates):
         except Exception as e:
             print(f"  [diagnostic] Eroare la produsul {checked}: {type(e).__name__}: {e}")
             print(f"  [diagnostic] Link: {link}")
-            print(f"  Darwin: eroare la verificarea produsului {checked}, opresc verificarea.")
-            break
+            misses += 1
+            if misses >= MAX_CONSECUTIVE_MISSES:
+                print(f"  Darwin: {MAX_CONSECUTIVE_MISSES} erori/lipsuri consecutive, opresc verificarea.")
+                break
+            continue
 
     print(f"  Darwin: {len(verified)} produse confirmate in stoc (verificate {checked}/{total})")
     return verified
